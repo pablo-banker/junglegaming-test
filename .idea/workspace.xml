@@ -4,17 +4,18 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="implement ARCHITECTURE file">
-      <change afterPath="$PROJECT_DIR$/internal/application/commands.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/errors.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/events.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/mocks_test.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/ports.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/wager_service.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/wager_service_test.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/wallet_service.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/application/wallet_service_test.go" afterDir="false" />
+    <list default="true" id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="implement application layer">
+      <change afterPath="$PROJECT_DIR$/internal/infrastructure/postgres/outbox_repository.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/infrastructure/postgres/transaction_manager.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/infrastructure/postgres/wager_repository.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/infrastructure/postgres/wallet_ledger_repository.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/infrastructure/postgres/wallet_repository.go" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/tests/integration/setup_test.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63/storage_v2/_src_/database/jungle.vQCGuw/schema/public.abK9xQ.meta" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63/storage_v2/_src_/database/jungle.vQCGuw/schema/public.abK9xQ.meta" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63/storage_v2/_src_/database/postgres.edMnLQ/schema/public.abK9xQ.meta" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/dataSources/3e23709c-d28b-4831-b554-5579c39aaa63/storage_v2/_src_/database/postgres.edMnLQ/schema/public.abK9xQ.meta" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docker-compose.yml" beforeDir="false" afterPath="$PROJECT_DIR$/docker-compose.yml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -197,7 +198,8 @@
     <MESSAGE value="commit vendor" />
     <MESSAGE value="adjust gitignore" />
     <MESSAGE value="implement ARCHITECTURE file" />
-    <option name="LAST_COMMIT_MESSAGE" value="implement ARCHITECTURE file" />
+    <MESSAGE value="implement application layer" />
+    <option name="LAST_COMMIT_MESSAGE" value="implement application layer" />
   </component>
   <component name="VgoModernizerVersionTracker">
     <upgrades>
