@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="ALL" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="Implement domain" />
+    <list default="true" id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="commit vendor">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -182,7 +185,8 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="create migrations" />
     <MESSAGE value="Implement domain" />
-    <option name="LAST_COMMIT_MESSAGE" value="Implement domain" />
+    <MESSAGE value="commit vendor" />
+    <option name="LAST_COMMIT_MESSAGE" value="commit vendor" />
   </component>
   <component name="VgoModernizerVersionTracker">
     <upgrades>
