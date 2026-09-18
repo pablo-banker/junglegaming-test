@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<dataSource name="postgres@localhost">
+<dataSource name="LOCAL">
   <database-model serializer="dbm" dbms="POSTGRES" family-id="POSTGRES" format-version="4.55">
     <root id="1">
       <DateStyle>mdy</DateStyle>
-      <IntrospectionStateNumber>880</IntrospectionStateNumber>
+      <IntrospectionStateNumber>883</IntrospectionStateNumber>
       <ServerVersion>17.11</ServerVersion>
       <StartupTime>1789670081</StartupTime>
       <TimeZones>true ACDT
@@ -801,7 +801,7 @@ true posixrules
 13317||10|C|G
 13317||-9223372036854775808|U|G
 13317||10|U|G</Grants>
-      <IntrospectionStateNumber>881</IntrospectionStateNumber>
+      <IntrospectionStateNumber>884</IntrospectionStateNumber>
       <ObjectId>16384</ObjectId>
       <OwnerName>jungle</OwnerName>
     </database>
@@ -817,7 +817,7 @@ true posixrules
 13317||10|C|G
 13317||-9223372036854775808|U|G
 13317||10|U|G</Grants>
-      <IntrospectionStateNumber>880</IntrospectionStateNumber>
+      <IntrospectionStateNumber>883</IntrospectionStateNumber>
       <ObjectId>5</ObjectId>
       <OwnerName>jungle</OwnerName>
     </database>
@@ -4240,11 +4240,11 @@ true posixrules
       <AutoIntrospectionLevel>3</AutoIntrospectionLevel>
       <Comment>standard public schema</Comment>
       <Current>1</Current>
-      <LastIntrospectionL1Xid>881</LastIntrospectionL1Xid>
-      <LastIntrospectionL2Xid>881</LastIntrospectionL2Xid>
-      <LastIntrospectionL3Xid>881</LastIntrospectionL3Xid>
+      <LastIntrospectionL1Xid>884</LastIntrospectionL1Xid>
+      <LastIntrospectionL2Xid>884</LastIntrospectionL2Xid>
+      <LastIntrospectionL3Xid>884</LastIntrospectionL3Xid>
       <LastIntrospectionLevel>3</LastIntrospectionLevel>
-      <LastIntrospectionLocalTimestamp>2026-09-18.18:39:27</LastIntrospectionLocalTimestamp>
+      <LastIntrospectionLocalTimestamp>2026-09-18.20:11:07</LastIntrospectionLocalTimestamp>
       <LastIntrospectionVersion>260210</LastIntrospectionVersion>
       <ObjectId>2200</ObjectId>
       <StateNumber>532</StateNumber>
@@ -7602,11 +7602,11 @@ true posixrules
       <AutoIntrospectionLevel>3</AutoIntrospectionLevel>
       <Comment>standard public schema</Comment>
       <Current>1</Current>
-      <LastIntrospectionL1Xid>880</LastIntrospectionL1Xid>
-      <LastIntrospectionL2Xid>880</LastIntrospectionL2Xid>
-      <LastIntrospectionL3Xid>880</LastIntrospectionL3Xid>
+      <LastIntrospectionL1Xid>883</LastIntrospectionL1Xid>
+      <LastIntrospectionL2Xid>883</LastIntrospectionL2Xid>
+      <LastIntrospectionL3Xid>883</LastIntrospectionL3Xid>
       <LastIntrospectionLevel>3</LastIntrospectionLevel>
-      <LastIntrospectionLocalTimestamp>2026-09-18.18:39:27</LastIntrospectionLocalTimestamp>
+      <LastIntrospectionLocalTimestamp>2026-09-18.20:11:06</LastIntrospectionLocalTimestamp>
       <LastIntrospectionVersion>260210</LastIntrospectionVersion>
       <ObjectId>2200</ObjectId>
       <StateNumber>532</StateNumber>

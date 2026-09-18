@@ -1,6 +1,6 @@
 <DataSourcesHistory>
   <DataSourceFromHistory isRemovedFromProject="false">
-    <data-source source="LOCAL" name="postgres@localhost" uuid="3e23709c-d28b-4831-b554-5579c39aaa63">
+    <data-source source="LOCAL" name="LOCAL" uuid="3e23709c-d28b-4831-b554-5579c39aaa63">
       <database-info product="PostgreSQL" version="17.11" jdbc-version="4.2" driver-name="PostgreSQL JDBC Driver" driver-version="42.7.13" dbms="POSTGRES" exact-version="17.11" exact-driver-version="42.7">
         <identifier-quote-string>&quot;</identifier-quote-string>
       </database-info>
