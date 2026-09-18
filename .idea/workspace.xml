@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="" />
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="DatabaseLocalColorSettings">
+    <colors>
+      <entry key="3e23709c-d28b-4831-b554-5579c39aaa63" value="" />
+    </colors>
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Go File" />
+      </list>
+    </option>
+  </component>
+  <component name="GOROOT" url="file://$USER_HOME$/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.27.1.darwin-arm64" />
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GoLinterSelectedExecutable" path="/opt/homebrew/bin/golangci-lint" />
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 4,
+  &quot;fromUser&quot;: false
+}</component>
+  <component name="ProjectId" id="3JQgEq28ybYZdMXPYvl5t2R59K3" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "DefaultGoTemplateProperty": "Go File",
+    "Go Test.TestCurrencyEqual in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyAdd in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyCompare in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyEqual in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyNegate in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyOperationsRejectCurrencyMismatch in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneySub in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneySubCanProduceNegativeInternalValue in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestMoneyZero in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestNewCurrency in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestParseMoney in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestParseMoneyRejectsUninitializedCurrency in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.TestRehydrateWagerTransactionPreservesReferenceType in github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "Go Test.go test github.com/pablo-banker/junglegaming-test/internal/domain.executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.GoLinterPluginOnboardingV2": "true",
+    "RunOnceActivity.GoLinterPluginStorageMigration": "true",
+    "RunOnceActivity.GoOptimizationToolWindowEnableInLayout.v333333": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.go.analysis.ui.options.defaults": "true",
+    "RunOnceActivity.go.formatter.settings.were.checked": "true",
+    "RunOnceActivity.go.modules.go.list.on.any.changes.was.set": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/pablobanker",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "go"
+  },
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "postgresql"
+    ]
+  }
+}]]></component>
+  <component name="RunManager" selected="Go Test.TestRehydrateWagerTransactionPreservesReferenceType in github.com/pablo-banker/junglegaming-test/internal/domain">
+    <configuration name="go build github.com/pablo-banker/junglegaming-test/cmd/server" type="GoApplicationRunConfiguration" factoryName="Go Application" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/cmd/server" />
+      <directory value="$PROJECT_DIR$" />
+      <auto_managed_config_id value="$PROJECT_DIR$/cmd/server" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestMoneyOperationsRejectCurrencyMismatch in github.com/pablo-banker/junglegaming-test/internal/domain" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$/internal/domain" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/internal/domain" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestMoneyOperationsRejectCurrencyMismatch\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestMoneyZero in github.com/pablo-banker/junglegaming-test/internal/domain" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$/internal/domain" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/internal/domain" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestMoneyZero\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestParseMoneyRejectsUninitializedCurrency in github.com/pablo-banker/junglegaming-test/internal/domain" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$/internal/domain" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/internal/domain" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestParseMoneyRejectsUninitializedCurrency\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestRehydrateWagerTransactionPreservesReferenceType in github.com/pablo-banker/junglegaming-test/internal/domain" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$/internal/domain" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/internal/domain" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestRehydrateWagerTransactionPreservesReferenceType\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="go test github.com/pablo-banker/junglegaming-test/internal/domain" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="junglegaming-test" />
+      <working_directory value="$PROJECT_DIR$/internal/domain" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/pablo-banker/junglegaming-test/internal/domain" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Go Test.TestRehydrateWagerTransactionPreservesReferenceType in github.com/pablo-banker/junglegaming-test/internal/domain" />
+        <item itemvalue="Go Test.go test github.com/pablo-banker/junglegaming-test/internal/domain" />
+        <item itemvalue="Go Test.TestMoneyZero in github.com/pablo-banker/junglegaming-test/internal/domain" />
+        <item itemvalue="Go Test.TestParseMoneyRejectsUninitializedCurrency in github.com/pablo-banker/junglegaming-test/internal/domain" />
+        <item itemvalue="Go Test.TestMoneyOperationsRejectCurrencyMismatch in github.com/pablo-banker/junglegaming-test/internal/domain" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-gosdk-63c95d513abe-08e7ff217c2b-org.jetbrains.plugins.go.sharedIndexes.bundled-GO-262.10968.67" />
+        <option value="bundled-js-predefined-d6986cc7102b-4abd2a77f808-JavaScript-GO-262.10968.67" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="25d69196-4847-45fe-9f30-9d5b232f893a" name="Changes" comment="" />
+      <created>1789598596950</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1789598596950</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="VgoModernizerVersionTracker">
+    <upgrades>
+      <map>
+        <entry key="$PROJECT_DIR$/go.mod">
+          <value>
+            <VersionUpgradeInfo>
+              <version>1.27</version>
+              <timestamp>1789664794681</timestamp>
+            </VersionUpgradeInfo>
+          </value>
+        </entry>
+      </map>
+    </upgrades>
+  </component>
+</project>
