@@ -1,10 +1,9 @@
-//go:build unit
-
 package sqs
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -95,6 +94,9 @@ func newWagerMessageHandlerForTest() (*WagerMessageHandler, *fakeWagerMessageTra
 		inbox:     inbox,
 		service:   service,
 		clock:     clock,
+		logger:    slog.New(slog.DiscardHandler),
+
+		allowedProviders: map[string]bool{"provider-a": true},
 	}
 
 	return handler, txManager, inbox, service, clock
@@ -103,19 +105,19 @@ func newWagerMessageHandlerForTest() (*WagerMessageHandler, *fakeWagerMessageTra
 // wagerMessageHandlerTestBody returns a valid wager SQS message.
 func wagerMessageHandlerTestBody() string {
 	return `{
-		"correlationId":"correlation-123",
-		"causationId":"causation-123",
-		"command":{
+		"messageId":"msg-123",
+		"type":"WagerTransactionRequested",
+		"occurredAt":"2026-09-08T12:00:00.000Z",
+		"data":{
 			"providerId":"provider-a",
 			"externalTransactionId":"transaction-123",
-			"idempotencyKey":"idempotency-123",
+			"idempotencyKey":"provider-a:transaction-123",
 			"walletId":"11111111-1111-1111-1111-111111111111",
 			"playerId":"22222222-2222-2222-2222-222222222222",
 			"roundId":"round-123",
 			"gameId":"game-123",
-			"type":"BET",
-			"amount":"25.00",
-			"currency":"BRL"
+			"kind":"BET",
+			"money":{"amount":"25.00","currency":"BRL"}
 		}
 	}`
 }
@@ -206,16 +208,20 @@ func TestWagerMessageHandlerProcessesNewMessage(t *testing.T) {
 		t.Errorf("expected consumer %s, got %s", wagerConsumerName, inbox.consumerName)
 	}
 
-	if inbox.messageID != "message-123" {
-		t.Errorf("expected message-123, got %s", inbox.messageID)
+	if inbox.messageID != "msg-123" {
+		t.Errorf("expected envelope message id msg-123, got %s", inbox.messageID)
 	}
 
 	if inbox.messageHash == "" {
 		t.Fatal("expected message hash")
 	}
 
-	if service.metadata.CorrelationID != "correlation-123" {
-		t.Errorf("expected correlation-123, got %s", service.metadata.CorrelationID)
+	if service.metadata.CorrelationID != "msg-123" {
+		t.Errorf("expected correlation msg-123, got %s", service.metadata.CorrelationID)
+	}
+
+	if service.command.Type != "BET" || service.command.Amount != "25.00" || service.command.Currency != "BRL" {
+		t.Errorf("unexpected command mapping: %+v", service.command)
 	}
 }
 
@@ -349,5 +355,22 @@ func TestHashMessageChangesWithPayload(t *testing.T) {
 
 	if first == second {
 		t.Fatal("expected different payload hashes")
+	}
+}
+
+// TestWagerMessageHandlerRejectsProviderNotAllowed verifies SQS messages cannot act for unknown providers.
+func TestWagerMessageHandlerRejectsProviderNotAllowed(t *testing.T) {
+	handler, txManager, _, service, _ := newWagerMessageHandlerForTest()
+
+	handler.allowedProviders = map[string]bool{"provider-b": true}
+
+	err := handler.Handle(context.Background(), "message-123", wagerMessageHandlerTestBody())
+
+	if !errors.Is(err, ErrProviderNotAllowed) {
+		t.Fatalf("expected ErrProviderNotAllowed, got %v", err)
+	}
+
+	if txManager.called || service.calls != 0 {
+		t.Fatal("expected the message to be rejected before any processing")
 	}
 }

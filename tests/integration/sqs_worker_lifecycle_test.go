@@ -4,9 +4,6 @@ package integration
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -18,6 +15,7 @@ import (
 	"github.com/pablo-banker/junglegaming-test/internal/domain"
 	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/postgres"
 	infrasqs "github.com/pablo-banker/junglegaming-test/internal/infrastructure/sqs"
+	"github.com/pablo-banker/junglegaming-test/internal/worker"
 )
 
 // waitForWalletState waits until the worker commits the expected wallet state.
@@ -84,36 +82,34 @@ func TestSQSWorkerLifecycleStartsAndStopsWithFx(t *testing.T) {
 		wagerRepository,
 		ledgerRepository,
 		outboxRepository,
+		application.DefaultReferenceRetryPolicy(),
 	)
 
 	handler := infrasqs.NewWagerMessageHandler(
 		txManager,
 		inboxRepository,
 		wagerService,
-		clock,
-	)
+		clock, sqsHandlerConfig(), discardLogger(), nil)
 
 	consumer := infrasqs.NewConsumer(
 		client,
 		handler,
 		cfg,
+		discardLogger(),
+		nil,
 	)
 
-	logger := slog.New(
-		slog.NewTextHandler(
-			io.Discard,
-			nil,
-		),
-	)
-
-	worker := infrasqs.NewWorker(
-		consumer,
-		logger,
+	loop := worker.NewLoop(
+		"sqs-wager-consumer",
+		consumer.PollOnce,
+		worker.Options{MinErrorDelay: time.Second, MaxErrorDelay: time.Second},
+		discardLogger(),
 	)
 
 	app := fx.New(
-		fx.Supply(worker),
-		fx.Invoke(infrasqs.RegisterWorker),
+		fx.NopLogger,
+		fx.Supply(loop),
+		fx.Invoke(worker.Register),
 	)
 
 	if err := app.Err(); err != nil {
@@ -170,28 +166,16 @@ func TestSQSWorkerLifecycleStartsAndStopsWithFx(t *testing.T) {
 	idempotencyKey := "idempotency-" + uuid.NewString()
 	correlationID := "correlation-" + uuid.NewString()
 
-	body := fmt.Sprintf(
-		`{
-			"correlationId":"%s",
-			"command":{
-				"providerId":"provider-a",
-				"externalTransactionId":"%s",
-				"idempotencyKey":"%s",
-				"walletId":"%s",
-				"playerId":"%s",
-				"roundId":"round-123",
-				"gameId":"game-123",
-				"type":"BET",
-				"amount":"25.00",
-				"currency":"BRL"
-			}
-		}`,
-		correlationID,
-		externalTransactionID,
-		idempotencyKey,
-		wallet.ID().String(),
-		wallet.PlayerID().String(),
-	)
+	body := wagerRequestedMessageBody(t, wagerRequestedMessage{
+		MessageID:             correlationID,
+		ProviderID:            "provider-a",
+		ExternalTransactionID: externalTransactionID,
+		IdempotencyKey:        idempotencyKey,
+		WalletID:              wallet.ID().String(),
+		PlayerID:              wallet.PlayerID().String(),
+		Kind:                  "BET",
+		Amount:                "25.00",
+	})
 
 	publisher := infrasqs.NewPublisher(
 		client,

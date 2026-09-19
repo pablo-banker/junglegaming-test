@@ -39,6 +39,7 @@ type WagerRepository interface {
 	FindByProviderAndIdempotencyKey(ctx context.Context, providerID string, idempotencyKey string) (*domain.WagerTransaction, error)
 	HasProcessedDirectReversal(ctx context.Context, referenceTransactionID uuid.UUID) (bool, error)
 	FindDuePendingReferenceForUpdate(ctx context.Context, now time.Time) (*PendingReferenceWork, error)
+	FindPendingReferenceForUpdate(ctx context.Context, transactionID uuid.UUID) (*PendingReferenceWork, error)
 	SchedulePendingReferenceRetry(ctx context.Context, transactionID uuid.UUID, retryCount int, nextAttemptAt time.Time) error
 }
 
@@ -46,7 +47,15 @@ type WagerRepository interface {
 type WalletLedgerRepository interface {
 	Create(ctx context.Context, entry *domain.WalletLedgerEntry) error
 	ListByWallet(ctx context.Context, walletID uuid.UUID, beforeCreatedAt *time.Time, beforeID *uuid.UUID, limit int) ([]*domain.WalletLedgerEntry, error)
-	CalculateBalance(ctx context.Context, walletID uuid.UUID, currency domain.Currency) (domain.Money, int64, error)
+	ReconciliationSnapshot(ctx context.Context, walletID uuid.UUID) (*ReconciliationSnapshot, error)
+}
+
+// ReconciliationSnapshot is the stored wallet balance and its ledger reconstruction,
+// read by a single statement so both come from the same database snapshot.
+type ReconciliationSnapshot struct {
+	StoredBalance     domain.Money
+	CalculatedBalance domain.Money
+	CheckedEntries    int64
 }
 
 type InboxRepository interface {
@@ -57,9 +66,10 @@ type InboxRepository interface {
 
 // OutboxRepository defines persistence operations required for application events.
 type OutboxRepository interface {
-	Create(ctx context.Context, event EventEnvelope) error
+	Create(ctx context.Context, event OutboxEvent) error
 }
 
+// PendingReferenceWork is a locked PENDING_REFERENCE transaction with its durable retry state.
 type PendingReferenceWork struct {
 	Transaction *domain.WagerTransaction
 	RetryCount  int

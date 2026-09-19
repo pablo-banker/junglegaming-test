@@ -14,10 +14,8 @@ import (
 	infrasqs "github.com/pablo-banker/junglegaming-test/internal/infrastructure/sqs"
 )
 
-const testSQSQueueURL = "http://localhost:4566/000000000000/wager-transactions.fifo"
-
-// newSQSTestDependencies creates the real SQS client and publisher for integration tests.
-func newSQSTestDependencies(t *testing.T) (*awssqs.Client, *infrasqs.Publisher) {
+// newSQSTestDependencies creates the real SQS client and a publisher bound to an isolated queue.
+func newSQSTestDependencies(t *testing.T) (*awssqs.Client, *infrasqs.Publisher, string) {
 	t.Helper()
 
 	t.Setenv("AWS_ACCESS_KEY_ID", "test")
@@ -26,7 +24,6 @@ func newSQSTestDependencies(t *testing.T) (*awssqs.Client, *infrasqs.Publisher) 
 	cfg := config.Config{
 		AWSRegion:   "us-east-1",
 		SQSEndpoint: "http://localhost:4566",
-		SQSQueueURL: testSQSQueueURL,
 	}
 
 	client, err := infrasqs.NewClient(cfg)
@@ -34,43 +31,13 @@ func newSQSTestDependencies(t *testing.T) (*awssqs.Client, *infrasqs.Publisher) 
 		t.Fatalf("failed to create SQS client: %v", err)
 	}
 
-	return client, infrasqs.NewPublisher(client, cfg)
-}
+	cfg.SQSQueueURL = createConsumerTestQueue(t, client)
 
-// drainSQSQueue removes pending messages before an integration test.
-func drainSQSQueue(t *testing.T, client *awssqs.Client) {
-	t.Helper()
-
-	ctx := context.Background()
-
-	for {
-		result, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(testSQSQueueURL),
-			MaxNumberOfMessages: 10,
-			WaitTimeSeconds:     0,
-		})
-		if err != nil {
-			t.Fatalf("failed to drain SQS queue: %v", err)
-		}
-
-		if len(result.Messages) == 0 {
-			return
-		}
-
-		for _, message := range result.Messages {
-			_, err := client.DeleteMessage(ctx, &awssqs.DeleteMessageInput{
-				QueueUrl:      aws.String(testSQSQueueURL),
-				ReceiptHandle: message.ReceiptHandle,
-			})
-			if err != nil {
-				t.Fatalf("failed to delete SQS message: %v", err)
-			}
-		}
-	}
+	return client, infrasqs.NewPublisher(client, cfg), cfg.SQSQueueURL
 }
 
 // receiveSQSMessages receives and deletes the expected number of messages.
-func receiveSQSMessages(t *testing.T, client *awssqs.Client, expected int) []string {
+func receiveSQSMessages(t *testing.T, client *awssqs.Client, queueURL string, expected int) []string {
 	t.Helper()
 
 	ctx := context.Background()
@@ -80,7 +47,7 @@ func receiveSQSMessages(t *testing.T, client *awssqs.Client, expected int) []str
 
 	for len(messages) < expected && time.Now().Before(deadline) {
 		result, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(testSQSQueueURL),
+			QueueUrl:            aws.String(queueURL),
 			MaxNumberOfMessages: 10,
 			WaitTimeSeconds:     1,
 		})
@@ -92,7 +59,7 @@ func receiveSQSMessages(t *testing.T, client *awssqs.Client, expected int) []str
 			messages = append(messages, aws.ToString(message.Body))
 
 			_, err := client.DeleteMessage(ctx, &awssqs.DeleteMessageInput{
-				QueueUrl:      aws.String(testSQSQueueURL),
+				QueueUrl:      aws.String(queueURL),
 				ReceiptHandle: message.ReceiptHandle,
 			})
 			if err != nil {
@@ -106,8 +73,7 @@ func receiveSQSMessages(t *testing.T, client *awssqs.Client, expected int) []str
 
 // TestSQSPublisherSendsMessage verifies messages reach the real FIFO queue.
 func TestSQSPublisherSendsMessage(t *testing.T) {
-	client, publisher := newSQSTestDependencies(t)
-	drainSQSQueue(t, client)
+	client, publisher, queueURL := newSQSTestDependencies(t)
 
 	body := `{"type":"BET","amount":"25.00"}`
 
@@ -116,7 +82,7 @@ func TestSQSPublisherSendsMessage(t *testing.T) {
 		t.Fatalf("failed to publish message: %v", err)
 	}
 
-	messages := receiveSQSMessages(t, client, 1)
+	messages := receiveSQSMessages(t, client, queueURL, 1)
 
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(messages))
@@ -129,8 +95,7 @@ func TestSQSPublisherSendsMessage(t *testing.T) {
 
 // TestSQSPublisherDeduplicatesMessages verifies the FIFO deduplication id prevents duplicate delivery.
 func TestSQSPublisherDeduplicatesMessages(t *testing.T) {
-	client, publisher := newSQSTestDependencies(t)
-	drainSQSQueue(t, client)
+	client, publisher, queueURL := newSQSTestDependencies(t)
 
 	body := `{"type":"BET","amount":"25.00"}`
 	groupID := "wallet-" + uuid.NewString()
@@ -146,7 +111,7 @@ func TestSQSPublisherDeduplicatesMessages(t *testing.T) {
 		t.Fatalf("failed to publish duplicate message: %v", err)
 	}
 
-	messages := receiveSQSMessages(t, client, 1)
+	messages := receiveSQSMessages(t, client, queueURL, 1)
 
 	if len(messages) != 1 {
 		t.Fatalf("expected 1 delivered message, got %d", len(messages))
@@ -157,7 +122,7 @@ func TestSQSPublisherDeduplicatesMessages(t *testing.T) {
 	}
 
 	result, err := client.ReceiveMessage(context.Background(), &awssqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(testSQSQueueURL),
+		QueueUrl:            aws.String(queueURL),
 		MaxNumberOfMessages: 10,
 		WaitTimeSeconds:     1,
 	})
@@ -172,8 +137,7 @@ func TestSQSPublisherDeduplicatesMessages(t *testing.T) {
 
 // TestSQSPublisherPreservesGroupOrder verifies FIFO ordering inside the same message group.
 func TestSQSPublisherPreservesGroupOrder(t *testing.T) {
-	client, publisher := newSQSTestDependencies(t)
-	drainSQSQueue(t, client)
+	client, publisher, queueURL := newSQSTestDependencies(t)
 
 	groupID := "wallet-" + uuid.NewString()
 
@@ -190,7 +154,7 @@ func TestSQSPublisherPreservesGroupOrder(t *testing.T) {
 		}
 	}
 
-	messages := receiveSQSMessages(t, client, len(expected))
+	messages := receiveSQSMessages(t, client, queueURL, len(expected))
 
 	if len(messages) != len(expected) {
 		t.Fatalf("expected %d messages, got %d", len(expected), len(messages))

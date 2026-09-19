@@ -1,5 +1,3 @@
-//go:build unit
-
 package domain
 
 import (
@@ -133,5 +131,19 @@ func TestMoneyJSONUsesExternalContract(t *testing.T) {
 
 	if string(data) != expected {
 		t.Errorf("expected %s, got %s", expected, data)
+	}
+}
+
+// BenchmarkParseMoney measures the strict decimal parsing used on every request.
+func BenchmarkParseMoney(b *testing.B) {
+	currency, err := NewCurrency("BRL")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		if _, err := ParseMoney("12345.67", currency); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

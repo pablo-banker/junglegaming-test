@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -110,6 +111,10 @@ func (s *WalletService) Create(ctx context.Context, command CreateWalletCommand,
 			}
 
 			if err := s.wallets.Create(txCtx, wallet); err != nil {
+				if errors.Is(err, ErrAlreadyExists) {
+					return ErrWalletAlreadyExists
+				}
+
 				return err
 			}
 
@@ -195,50 +200,36 @@ func (s *WalletService) ListLedger(
 	}, nil
 }
 
-// Reconcile compares the stored wallet balance with the reconstructed ledger balance.
+// Reconcile compares the stored wallet balance with the balance rebuilt from the ledger.
+// It only reads data and never changes the wallet.
 func (s *WalletService) Reconcile(ctx context.Context, walletID string) (*WalletReconciliationResult, error) {
 	id, err := uuid.Parse(walletID)
 	if err != nil || id == uuid.Nil {
 		return nil, ErrWalletNotFound
 	}
 
-	var result *WalletReconciliationResult
+	snapshot, err := s.ledger.ReconciliationSnapshot(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrWalletNotFound
+		}
 
-	err = s.txManager.WithinTransaction(
-		ctx,
-		func(txCtx context.Context) error {
-			wallet, err := s.wallets.FindByIDForUpdate(txCtx, id)
-			if err != nil {
-				return err
-			}
+		return nil, err
+	}
 
-			calculatedBalance, checkedEntries, err := s.ledger.CalculateBalance(txCtx, wallet.ID(), wallet.Balance().Currency())
-			if err != nil {
-				return err
-			}
-
-			difference, err := wallet.Balance().Sub(calculatedBalance)
-			if err != nil {
-				return err
-			}
-
-			result = &WalletReconciliationResult{
-				WalletID:          wallet.ID(),
-				StoredBalance:     wallet.Balance(),
-				CalculatedBalance: calculatedBalance,
-				Difference:        difference,
-				Consistent:        wallet.Balance().Equal(calculatedBalance),
-				CheckedEntries:    checkedEntries,
-			}
-
-			return nil
-		},
-	)
+	difference, err := snapshot.StoredBalance.Sub(snapshot.CalculatedBalance)
 	if err != nil {
 		return nil, err
 	}
 
-	return result, nil
+	return &WalletReconciliationResult{
+		WalletID:          id,
+		StoredBalance:     snapshot.StoredBalance,
+		CalculatedBalance: snapshot.CalculatedBalance,
+		Difference:        difference,
+		Consistent:        difference.IsZero(),
+		CheckedEntries:    snapshot.CheckedEntries,
+	}, nil
 }
 
 // createOpening creates the financial records for a positive initial balance.
@@ -310,52 +301,14 @@ func (s *WalletService) createOpeningEvents(
 	metadata CommandMetadata,
 	occurredAt time.Time,
 ) error {
-	processedEvent := EventEnvelope{
-		EventID:       uuid.New(),
-		EventType:     EventTypeWagerTransactionProcessed,
-		AggregateID:   opening.ID(),
-		CorrelationID: metadata.CorrelationID,
-		CausationID:   metadata.CausationID,
-		Version:       EventVersion,
-		OccurredAt:    occurredAt,
-		Payload: WagerTransactionProcessedPayload{
-			TransactionID: opening.ID(),
-			WalletID:      wallet.ID(),
-			PlayerID:      wallet.PlayerID(),
-			Type:          opening.Type(),
-			Amount:        opening.Amount(),
-			BalanceBefore: entry.BalanceBefore(),
-			BalanceAfter:  entry.BalanceAfter(),
-		},
-	}
-
-	if err := s.outbox.Create(ctx, processedEvent); err != nil {
+	processed, err := processedEventData(opening)
+	if err != nil {
 		return err
 	}
 
-	balanceChangedEvent := EventEnvelope{
-		EventID:       uuid.New(),
-		EventType:     EventTypeWalletBalanceChanged,
-		AggregateID:   wallet.ID(),
-		CorrelationID: metadata.CorrelationID,
-		CausationID:   metadata.CausationID,
-		Version:       EventVersion,
-		OccurredAt:    occurredAt,
-		Payload: WalletBalanceChangedPayload{
-			WalletID:      wallet.ID(),
-			PlayerID:      wallet.PlayerID(),
-			TransactionID: opening.ID(),
-			Direction:     entry.Direction(),
-			Amount:        entry.Amount(),
-			BalanceBefore: entry.BalanceBefore(),
-			BalanceAfter:  entry.BalanceAfter(),
-			WalletVersion: wallet.Version(),
-		},
-	}
-
-	if err := s.outbox.Create(ctx, balanceChangedEvent); err != nil {
+	if err := s.outbox.Create(ctx, NewWagerTransactionProcessedEvent(metadata, occurredAt, processed)); err != nil {
 		return err
 	}
 
-	return nil
+	return s.outbox.Create(ctx, NewWalletBalanceChangedEvent(metadata, occurredAt, balanceChangedEventData(wallet, entry)))
 }

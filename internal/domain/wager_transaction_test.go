@@ -1,9 +1,8 @@
-//go:build unit
-
 package domain
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,6 +175,28 @@ func TestNewExternalWagerTransactionValidatesTypeRules(t *testing.T) {
 				params.Amount = mustWagerMoney(t, "25.00")
 			},
 			want: ErrInvalidWagerAmount,
+		},
+		{
+			name: "idempotency key is bounded",
+			change: func(params *NewExternalWagerTransactionParams) {
+				params.IdempotencyKey = strings.Repeat("k", 256)
+			},
+			want: ErrInvalidIdempotencyKey,
+		},
+		{
+			name: "external transaction id is bounded",
+			change: func(params *NewExternalWagerTransactionParams) {
+				params.ExternalTransactionID = strings.Repeat("x", 256)
+			},
+			want: ErrInvalidExternalTransactionID,
+		},
+		{
+			name: "operation cannot reference itself",
+			change: func(params *NewExternalWagerTransactionParams) {
+				params.Type = WagerTransactionTypeRefund
+				params.ReferenceExternalTransactionID = params.ExternalTransactionID
+			},
+			want: ErrInvalidWagerReference,
 		},
 		{
 			name: "refund requires reference",

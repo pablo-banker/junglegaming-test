@@ -13,4 +13,5 @@ var (
 	ErrInvalidWagerMessageID         = errors.New("invalid wager message id")
 	ErrInvalidWagerMessageType       = errors.New("invalid wager message type")
 	ErrInvalidWagerMessageOccurredAt = errors.New("invalid wager message occurred at")
+	ErrProviderNotAllowed            = errors.New("provider is not allowed to send messages")
 )

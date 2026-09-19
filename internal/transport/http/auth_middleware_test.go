@@ -1,10 +1,9 @@
-//go:build unit
-
 package httptransport
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,11 +28,10 @@ func (f *fakeTokenVerifier) Verify(
 
 // TestAuthMiddlewareRejectsMissingToken verifies requests without bearer tokens are unauthorized.
 func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
-		&fakeTokenVerifier{},
-	)
+		&fakeTokenVerifier{}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -66,11 +64,10 @@ func TestAuthMiddlewareRejectsMissingToken(t *testing.T) {
 
 // TestAuthMiddlewareRejectsMalformedAuthorization verifies malformed authorization headers are unauthorized.
 func TestAuthMiddlewareRejectsMalformedAuthorization(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
-		&fakeTokenVerifier{},
-	)
+		&fakeTokenVerifier{}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -108,13 +105,12 @@ func TestAuthMiddlewareRejectsMalformedAuthorization(t *testing.T) {
 
 // TestAuthMiddlewareRejectsInvalidToken verifies verifier failures are unauthorized.
 func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
 			err: auth.ErrInvalidToken,
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -152,7 +148,7 @@ func TestAuthMiddlewareRejectsInvalidToken(t *testing.T) {
 
 // TestAuthMiddlewareStoresPrincipal verifies authenticated identity reaches the next handler.
 func TestAuthMiddlewareStoresPrincipal(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	expected := auth.Principal{
 		Subject:    "subject-123",
@@ -166,8 +162,7 @@ func TestAuthMiddlewareStoresPrincipal(t *testing.T) {
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
 			principal: expected,
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",

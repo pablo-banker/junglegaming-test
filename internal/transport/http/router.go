@@ -2,9 +2,13 @@ package httptransport
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	recoverer "github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // NewRouter creates and configures the Fiber application routes and error handling.
@@ -14,17 +18,25 @@ func NewRouter(
 	walletHandler *WalletHandler,
 	wagerHandler *WagerHandler,
 	logger *slog.Logger,
+	registry *prometheus.Registry,
 ) *fiber.App {
 	app := fiber.New(fiber.Config{
-		AppName: "Jungle Gaming Backend Challenge",
-		ErrorHandler: func(c fiber.Ctx, err error) error {
-			apiErr := ResolveError(err)
+		AppName:      "Jungle Gaming Backend Challenge",
+		ErrorHandler: newErrorHandler(logger),
 
-			return BuildErrorResponse(c, logger, apiErr)
-		},
+		// Wager and wallet requests are a few hundred bytes; timeouts protect the server
+		// from slow clients holding connections open.
+		BodyLimit:    16 * 1024,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	})
 
 	app.Use(recoverer.New())
+	app.Use(requestContext(logger))
+
+	// Operational endpoints are public; they expose no business data.
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
 	// Health
 	health := app.Group("/health")

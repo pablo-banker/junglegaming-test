@@ -1,0 +1,10 @@
+.git
+.idea
+.vscode
+.claude
+.env
+vendor
+coverage*
+*.out
+tests
+docs

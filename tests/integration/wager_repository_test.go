@@ -395,6 +395,7 @@ func TestWagerRepositoryPersistsPendingReference(t *testing.T) {
 		transaction,
 		nextAttemptAt,
 		expiresAt,
+		application.CommandMetadata{CorrelationID: uuid.NewString()},
 	); err != nil {
 		t.Fatalf(
 			"failed to persist pending reference: %v",
@@ -414,7 +415,7 @@ func TestWagerRepositoryPersistsPendingReference(t *testing.T) {
 		`
 			SELECT
 				status::text,
-				reference_attempts,
+				reference_retry_count,
 				next_reference_attempt_at,
 				reference_expires_at
 			FROM wager_transactions

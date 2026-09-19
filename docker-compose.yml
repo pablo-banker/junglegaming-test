@@ -1,93 +1,153 @@
+# Local environment. Every variable has a default, so `docker compose up --build`
+# works from a clean checkout; copy .env.example to .env to override them.
+#
+#   docker compose up --build                     app + dependencies (migrations run first)
+#   docker compose --profile multi up --build     three independent app instances
+#   docker compose up -d postgres_test            database used by integration tests
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  environment:
+    HTTP_PORT: "8080"
+    # Least privilege role: no UPDATE, DELETE or TRUNCATE on the ledger (migration 000014).
+    DATABASE_URL: postgres://jungle_app:${APP_DB_PASSWORD:-jungle_app}@postgres:5432/${POSTGRES_DB:-junglegaming}?sslmode=disable
+    # Tokens are requested through localhost, so that is the issuer they carry.
+    KEYCLOAK_ISSUER_URL: http://localhost:${KEYCLOAK_PORT:-8081}/realms/junglegaming
+    KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/junglegaming/protocol/openid-connect/certs
+    KEYCLOAK_AUDIENCE: junglegaming-api
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+    AWS_REGION: ${AWS_REGION:-us-east-1}
+    SQS_ENDPOINT: http://ministack:4566
+    SQS_WAGER_QUEUE_URL: http://ministack:4566/000000000000/wager-transactions.fifo
+    SQS_WAGER_DLQ_URL: http://ministack:4566/000000000000/wager-transactions-dlq.fifo
+    SQS_EVENT_QUEUE_URL: http://ministack:4566/000000000000/integration-events.fifo
+    SQS_ALLOWED_PROVIDERS: ${SQS_ALLOWED_PROVIDERS:-provider-a,provider-b}
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    keycloak:
+      condition: service_healthy
+    ministack:
+      condition: service_healthy
+
 services:
+  app:
+    <<: *app
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  app-2:
+    <<: *app
+    profiles: ["multi"]
+    ports:
+      - "127.0.0.1:8082:8080"
+
+  app-3:
+    <<: *app
+    profiles: ["multi"]
+    ports:
+      - "127.0.0.1:8083:8080"
+
+  migrate:
+    image: migrate/migrate:v4.20.1
+    command:
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-junglegaming}?sslmode=disable
+      - up
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:17-alpine
     container_name: jungle-postgres
-
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-junglegaming}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-jungle_app}
     ports:
-      - "${POSTGRES_PORT}:5432"
-
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
+      - ./docker/postgres/01-app-role.sh:/docker-entrypoint-initdb.d/01-app-role.sh:ro
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 5s
 
   postgres_test:
     image: postgres:17-alpine
     container_name: jungle-postgres-test
-
+    profiles: ["test"]
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_TEST_DB}
-
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_TEST_DB:-junglegaming_test}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-jungle_app}
     ports:
-      - "${POSTGRES_TEST_PORT}:5432"
-
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-5434}:5432"
+    volumes:
+      - ./docker/postgres/01-app-role.sh:/docker-entrypoint-initdb.d/01-app-role.sh:ro
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_TEST_DB}"
-        ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 5s
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.4
     container_name: jungle-keycloak
-
     command:
       - start-dev
       - --import-realm
-
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-
-      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT}
-
-      KEYCLOAK_PROVIDER_A_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_A_CLIENT_SECRET}
-      KEYCLOAK_PROVIDER_B_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_B_CLIENT_SECRET}
-      KEYCLOAK_INTERNAL_CLIENT_SECRET: ${KEYCLOAK_INTERNAL_CLIENT_SECRET}
-
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8081}
+      KC_HEALTH_ENABLED: "true"
+      # Resolved by the ${...} placeholders of keycloak/junglegaming-realm.json.
+      KEYCLOAK_PROVIDER_A_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_A_CLIENT_SECRET:-provider-a-secret}
+      KEYCLOAK_PROVIDER_B_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_B_CLIENT_SECRET:-provider-b-secret}
+      KEYCLOAK_INTERNAL_CLIENT_SECRET: ${KEYCLOAK_INTERNAL_CLIENT_SECRET:-internal-service-secret}
+      KEYCLOAK_SHORT_LIVED_CLIENT_SECRET: ${KEYCLOAK_SHORT_LIVED_CLIENT_SECRET:-provider-a-short-lived-secret}
     ports:
-      - "${KEYCLOAK_PORT}:8080"
-
+      - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image has no curl; the management port serves /health/ready.
+      test: ["CMD", "bash", "-c", "{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   ministack:
-    image: ministackorg/ministack:latest
+    image: ministackorg/ministack:1.5.13
     container_name: junglegaming-ministack
     ports:
-      - "4566:4566"
+      - "127.0.0.1:4566:4566"
     environment:
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_DEFAULT_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-test}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-test}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
     volumes:
       - ./docker/ministack/init-sqs.sh:/docker-entrypoint-initaws.d/ready.d/01-init-sqs.sh:ro
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:4566/_ministack/health" ]
+      # Healthy only after the init script provisioned the last queue.
+      test: ["CMD", "aws", "--endpoint-url=http://localhost:4566", "--region", "us-east-1", "sqs", "get-queue-url", "--queue-name", "integration-events-dlq.fifo"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      retries: 20
+      start_period: 5s
 
 volumes:
   postgres_data:

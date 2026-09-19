@@ -1,5 +1,3 @@
-//go:build unit
-
 package httptransport
 
 import (
@@ -64,9 +62,7 @@ func newWagerHandlerTestApp(service wagerService, principal auth.Principal) *fib
 	}
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c fiber.Ctx, err error) error {
-			return BuildErrorResponse(c, logger, ResolveError(err))
-		},
+		ErrorHandler: newErrorHandler(logger),
 	})
 
 	app.Use(func(c fiber.Ctx) error {
@@ -158,35 +154,33 @@ func TestWagerHandlerGetByIDReturnsTransaction(t *testing.T) {
 	}
 
 	var body struct {
-		Data struct {
-			TransactionID         string `json:"transactionId"`
-			ProviderID            string `json:"providerId"`
-			ExternalTransactionID string `json:"externalTransactionId"`
-			Status                string `json:"status"`
-			BalanceAfter          struct {
-				Amount string `json:"amount"`
-			} `json:"balanceAfter"`
-		} `json:"data"`
+		TransactionID         string `json:"transactionId"`
+		ProviderID            string `json:"providerId"`
+		ExternalTransactionID string `json:"externalTransactionId"`
+		Status                string `json:"status"`
+		BalanceAfter          struct {
+			Amount string `json:"amount"`
+		} `json:"balanceAfter"`
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
 
-	if body.Data.TransactionID != result.TransactionID.String() {
-		t.Errorf("expected transaction id %s, got %s", result.TransactionID, body.Data.TransactionID)
+	if body.TransactionID != result.TransactionID.String() {
+		t.Errorf("expected transaction id %s, got %s", result.TransactionID, body.TransactionID)
 	}
 
-	if body.Data.ProviderID != "provider-a" {
-		t.Errorf("expected provider-a, got %s", body.Data.ProviderID)
+	if body.ProviderID != "provider-a" {
+		t.Errorf("expected provider-a, got %s", body.ProviderID)
 	}
 
-	if body.Data.Status != "PROCESSED" {
-		t.Errorf("expected PROCESSED, got %s", body.Data.Status)
+	if body.Status != "PROCESSED" {
+		t.Errorf("expected PROCESSED, got %s", body.Status)
 	}
 
-	if body.Data.BalanceAfter.Amount != "75.00" {
-		t.Errorf("expected balance after 75.00, got %s", body.Data.BalanceAfter.Amount)
+	if body.BalanceAfter.Amount != "75.00" {
+		t.Errorf("expected balance after 75.00, got %s", body.BalanceAfter.Amount)
 	}
 }
 

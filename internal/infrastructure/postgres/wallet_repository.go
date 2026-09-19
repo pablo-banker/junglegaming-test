@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
@@ -87,6 +86,10 @@ func (r *WalletRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.
 }
 
 // FindByIDForUpdate returns and locks a wallet for financial modification.
+//
+// FOR NO KEY UPDATE serializes writers of the same wallet while staying compatible with
+// the FOR KEY SHARE locks taken by foreign key checks of wager and ledger inserts.
+// FOR UPDATE would conflict with those locks and deadlock concurrent wagers.
 func (r *WalletRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Wallet, error) {
 	tx, ok := txFromContext(ctx)
 	if !ok {
@@ -104,7 +107,7 @@ func (r *WalletRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) 
 			updated_at
 		FROM wallets
 		WHERE id = $1
-		FOR UPDATE
+		FOR NO KEY UPDATE
 	`
 
 	return scanWallet(
@@ -139,7 +142,14 @@ func (r *WalletRepository) FindByPlayerAndCurrency(ctx context.Context, playerID
 }
 
 // Update persists the mutable financial state of a wallet.
+//
+// The version predicate rejects a lost update even if a caller forgot to lock the wallet.
 func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) error {
+	tx, ok := txFromContext(ctx)
+	if !ok {
+		return ErrTransactionRequired
+	}
+
 	const query = `
 		UPDATE wallets
 		SET
@@ -147,9 +157,10 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 			version = $3,
 			updated_at = $4
 		WHERE id = $1
+		  AND version = $3 - 1
 	`
 
-	result, err := db(ctx, r.pool).Exec(
+	result, err := tx.Exec(
 		ctx,
 		query,
 		wallet.ID(),
@@ -162,7 +173,7 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 	}
 
 	if result.RowsAffected() == 0 {
-		return application.ErrNotFound
+		return application.ErrConcurrentUpdate
 	}
 
 	return nil
@@ -218,12 +229,4 @@ func scanWallet(row pgx.Row) (*domain.Wallet, error) {
 		createdAt,
 		updatedAt,
 	)
-}
-
-// isUniqueViolation reports whether PostgreSQL rejected a unique constraint.
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-
-	return errors.As(err, &pgErr) &&
-		pgErr.Code == "23505"
 }

@@ -1,8 +1,13 @@
 package sqs
 
 import (
-	"github.com/pablo-banker/junglegaming-test/internal/application"
+	"log/slog"
+	"time"
+
 	"go.uber.org/fx"
+
+	"github.com/pablo-banker/junglegaming-test/internal/application"
+	"github.com/pablo-banker/junglegaming-test/internal/worker"
 )
 
 var Module = fx.Module(
@@ -10,16 +15,28 @@ var Module = fx.Module(
 	fx.Provide(
 		NewClient,
 		NewHealthChecker,
-		NewPublisher,
 		NewWagerMessageHandler,
 		NewConsumer,
-		NewWorker,
 		fx.Annotate(
 			NewOutboxPublisher,
 			fx.As(new(application.IntegrationEventPublisher)),
 		),
 	),
 	fx.Invoke(
-		RegisterWorker,
+		registerConsumer,
 	),
 )
+
+// registerConsumer runs the wager queue consumer for the application lifetime.
+// Receives long-poll, so the loop does not pause between empty batches.
+func registerConsumer(lifecycle fx.Lifecycle, consumer *Consumer, logger *slog.Logger) {
+	worker.Register(lifecycle, worker.NewLoop(
+		"sqs-wager-consumer",
+		consumer.PollOnce,
+		worker.Options{
+			MinErrorDelay: time.Second,
+			MaxErrorDelay: 30 * time.Second,
+		},
+		logger,
+	))
+}

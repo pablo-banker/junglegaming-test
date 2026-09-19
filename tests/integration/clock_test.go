@@ -43,8 +43,9 @@ func TestPostgresClockReturnsDatabaseTime(t *testing.T) {
 	}
 }
 
-// TestPostgresClockUsesTransactionTimestamp verifies stable time inside one transaction.
-func TestPostgresClockUsesTransactionTimestamp(t *testing.T) {
+// TestPostgresClockAdvancesInsideTransaction verifies the clock is not frozen at BEGIN.
+// Reading it after the wallet lock must observe time after the previous committed movement.
+func TestPostgresClockAdvancesInsideTransaction(t *testing.T) {
 	ctx := integrationContext(t)
 	pool := openIntegrationPool(t)
 
@@ -74,9 +75,9 @@ func TestPostgresClockUsesTransactionTimestamp(t *testing.T) {
 		t.Fatalf("transaction failed: %v", err)
 	}
 
-	if !first.Equal(second) {
+	if !second.After(first) {
 		t.Fatalf(
-			"expected stable transaction timestamp, got %s and %s",
+			"expected clock to advance inside the transaction, got %s and %s",
 			first,
 			second,
 		)

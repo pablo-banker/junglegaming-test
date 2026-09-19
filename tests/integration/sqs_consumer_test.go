@@ -4,7 +4,6 @@ package integration
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 	"github.com/pablo-banker/junglegaming-test/internal/domain"
 	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/postgres"
@@ -98,16 +98,16 @@ func TestSQSConsumerProcessesAndDeletesMessage(t *testing.T) {
 		wagerRepository,
 		ledgerRepository,
 		outboxRepository,
+		application.DefaultReferenceRetryPolicy(),
 	)
 
 	handler := infrasqs.NewWagerMessageHandler(
 		txManager,
 		inboxRepository,
 		wagerService,
-		clock,
-	)
+		clock, sqsHandlerConfig(), discardLogger(), nil)
 
-	consumer := infrasqs.NewConsumer(client, handler, cfg)
+	consumer := infrasqs.NewConsumer(client, handler, cfg, discardLogger(), nil)
 	publisher := infrasqs.NewPublisher(client, cfg)
 
 	currency, err := domain.NewCurrency("BRL")
@@ -138,35 +138,23 @@ func TestSQSConsumerProcessesAndDeletesMessage(t *testing.T) {
 	idempotencyKey := "key-" + uuid.NewString()
 	correlationID := "correlation-" + uuid.NewString()
 
-	body := fmt.Sprintf(
-		`{
-			"correlationId":"%s",
-			"command":{
-				"providerId":"provider-a",
-				"externalTransactionId":"%s",
-				"idempotencyKey":"%s",
-				"walletId":"%s",
-				"playerId":"%s",
-				"roundId":"round-123",
-				"gameId":"game-123",
-				"type":"BET",
-				"amount":"25.00",
-				"currency":"BRL"
-			}
-		}`,
-		correlationID,
-		externalTransactionID,
-		idempotencyKey,
-		wallet.ID().String(),
-		wallet.PlayerID().String(),
-	)
+	body := wagerRequestedMessageBody(t, wagerRequestedMessage{
+		MessageID:             correlationID,
+		ProviderID:            "provider-a",
+		ExternalTransactionID: externalTransactionID,
+		IdempotencyKey:        idempotencyKey,
+		WalletID:              wallet.ID().String(),
+		PlayerID:              wallet.PlayerID().String(),
+		Kind:                  "BET",
+		Amount:                "25.00",
+	})
 
 	err = publisher.Send(ctx, body, wallet.ID().String(), uuid.NewString())
 	if err != nil {
 		t.Fatalf("failed to publish wager message: %v", err)
 	}
 
-	err = consumer.PollOnce(ctx)
+	_, err = consumer.PollOnce(ctx, ctx)
 	if err != nil {
 		t.Fatalf("failed to poll wager message: %v", err)
 	}
@@ -212,73 +200,76 @@ func TestSQSConsumerProcessesAndDeletesMessage(t *testing.T) {
 	}
 }
 
-// TestSQSConsumerLeavesFailedMessageForRetry verifies failed messages become visible again.
-func TestSQSConsumerLeavesFailedMessageForRetry(t *testing.T) {
-	pool := openIntegrationPool(t)
+// TestSQSConsumerDelaysTransientFailure verifies an unavailable database delays the message
+// with backoff instead of consuming a delivery every visibility timeout or reaching the DLQ.
+func TestSQSConsumerDelaysTransientFailure(t *testing.T) {
 	ctx := integrationContext(t)
 
 	client, cfg := newConsumerSQSClient(t)
 
 	cfg.SQSQueueURL = createConsumerTestQueue(t, client)
 
-	txManager := postgres.NewTransactionManager(pool)
-	clock := postgres.NewClock(pool)
+	// Nothing listens on port 1, so every transaction fails as unavailable.
+	unreachable, err := pgxpool.New(ctx, "postgres://jungle:jungle@127.0.0.1:1/jungle?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatalf("failed to create unreachable pool: %v", err)
+	}
+
+	t.Cleanup(unreachable.Close)
+
+	txManager := postgres.NewTransactionManager(unreachable)
+	clock := postgres.NewClock(unreachable)
 
 	wagerService := application.NewWagerService(
 		txManager,
 		clock,
-		postgres.NewWalletRepository(pool),
-		postgres.NewWagerRepository(pool),
-		postgres.NewWalletLedgerRepository(pool),
+		postgres.NewWalletRepository(unreachable),
+		postgres.NewWagerRepository(unreachable),
+		postgres.NewWalletLedgerRepository(unreachable),
 		postgres.NewOutboxRepository(),
+		application.DefaultReferenceRetryPolicy(),
 	)
 
 	handler := infrasqs.NewWagerMessageHandler(
 		txManager,
-		postgres.NewInboxRepository(pool),
+		postgres.NewInboxRepository(unreachable),
 		wagerService,
-		clock,
-	)
+		clock, sqsHandlerConfig(), discardLogger(), nil)
 
-	consumer := infrasqs.NewConsumer(client, handler, cfg)
+	consumer := infrasqs.NewConsumer(client, handler, cfg, discardLogger(), nil)
 	publisher := infrasqs.NewPublisher(client, cfg)
 
-	body := `{"correlationId":`
+	body := wagerRequestedMessageBody(t, wagerRequestedMessage{
+		MessageID:             "message-" + uuid.NewString(),
+		ProviderID:            "provider-a",
+		ExternalTransactionID: "transaction-" + uuid.NewString(),
+		IdempotencyKey:        "key-" + uuid.NewString(),
+		WalletID:              uuid.NewString(),
+		PlayerID:              uuid.NewString(),
+		Kind:                  "BET",
+		Amount:                "25.00",
+	})
 
-	err := publisher.Send(ctx, body, "wallet-test", uuid.NewString())
-	if err != nil {
-		t.Fatalf("failed to publish malformed message: %v", err)
+	if err := publisher.Send(ctx, body, "wallet-test", uuid.NewString()); err != nil {
+		t.Fatalf("failed to publish message: %v", err)
 	}
 
-	err = consumer.PollOnce(ctx)
-	if err != nil {
-		t.Fatalf("unexpected poll error: %v", err)
+	if _, err := consumer.PollOnce(ctx, ctx); !application.IsTransient(err) {
+		t.Fatalf("expected transient poll error, got %v", err)
 	}
 
-	// The queue visibility timeout is 1 second.
-	time.Sleep(1100 * time.Millisecond)
+	// The queue visibility timeout is 1 second, the first backoff is 5 seconds.
+	time.Sleep(1500 * time.Millisecond)
 
 	result, err := client.ReceiveMessage(ctx, &awssqs.ReceiveMessageInput{
 		QueueUrl:        aws.String(cfg.SQSQueueURL),
 		WaitTimeSeconds: 1,
 	})
 	if err != nil {
-		t.Fatalf("failed to receive retried message: %v", err)
+		t.Fatalf("failed to receive: %v", err)
 	}
 
-	if len(result.Messages) != 1 {
-		t.Fatalf("expected failed message to reappear, got %d messages", len(result.Messages))
-	}
-
-	if aws.ToString(result.Messages[0].Body) != body {
-		t.Errorf("expected original message body, got %s", aws.ToString(result.Messages[0].Body))
-	}
-
-	_, err = client.DeleteMessage(ctx, &awssqs.DeleteMessageInput{
-		QueueUrl:      aws.String(cfg.SQSQueueURL),
-		ReceiptHandle: result.Messages[0].ReceiptHandle,
-	})
-	if err != nil {
-		t.Fatalf("failed to clean up retried message: %v", err)
+	if len(result.Messages) != 0 {
+		t.Fatalf("expected the message to stay invisible during backoff, got %d messages", len(result.Messages))
 	}
 }

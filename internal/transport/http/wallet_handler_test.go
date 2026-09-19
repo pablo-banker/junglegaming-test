@@ -1,5 +1,3 @@
-//go:build unit
-
 package httptransport
 
 import (
@@ -87,9 +85,7 @@ func newWalletHandlerTestApp(service walletService) *fiber.App {
 	}
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c fiber.Ctx, err error) error {
-			return BuildErrorResponse(c, logger, ResolveError(err))
-		},
+		ErrorHandler: newErrorHandler(logger),
 	})
 
 	app.Get("/wallets/:walletId", handler.Get)
@@ -175,35 +171,33 @@ func TestWalletHandlerGetReturnsWallet(t *testing.T) {
 	}
 
 	var body struct {
-		Data struct {
-			ID       string `json:"id"`
-			PlayerID string `json:"playerId"`
-			Balance  struct {
-				Amount   string `json:"amount"`
-				Currency string `json:"currency"`
-			} `json:"balance"`
-			Version int64 `json:"version"`
-		} `json:"data"`
+		ID       string `json:"id"`
+		PlayerID string `json:"playerId"`
+		Balance  struct {
+			Amount   string `json:"amount"`
+			Currency string `json:"currency"`
+		} `json:"balance"`
+		Version int64 `json:"version"`
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
 
-	if body.Data.ID != walletID.String() {
-		t.Errorf("expected wallet id %s, got %s", walletID, body.Data.ID)
+	if body.ID != walletID.String() {
+		t.Errorf("expected wallet id %s, got %s", walletID, body.ID)
 	}
 
-	if body.Data.PlayerID != playerID.String() {
-		t.Errorf("expected player id %s, got %s", playerID, body.Data.PlayerID)
+	if body.PlayerID != playerID.String() {
+		t.Errorf("expected player id %s, got %s", playerID, body.PlayerID)
 	}
 
-	if body.Data.Balance.Amount != "100.00" {
-		t.Errorf("expected balance 100.00, got %s", body.Data.Balance.Amount)
+	if body.Balance.Amount != "100.00" {
+		t.Errorf("expected balance 100.00, got %s", body.Balance.Amount)
 	}
 
-	if body.Data.Version != 3 {
-		t.Errorf("expected version 3, got %d", body.Data.Version)
+	if body.Version != 3 {
+		t.Errorf("expected version 3, got %d", body.Version)
 	}
 }
 
@@ -262,24 +256,22 @@ func TestWalletHandlerLedgerUsesDefaultLimit(t *testing.T) {
 	}
 
 	var body struct {
-		Data struct {
-			Entries []struct {
-				ID string `json:"id"`
-			} `json:"entries"`
-			NextCursor string `json:"nextCursor"`
-		} `json:"data"`
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+		NextCursor string `json:"nextCursor"`
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
 
-	if len(body.Data.Entries) != 1 {
-		t.Fatalf("expected 1 ledger entry, got %d", len(body.Data.Entries))
+	if len(body.Entries) != 1 {
+		t.Fatalf("expected 1 ledger entry, got %d", len(body.Entries))
 	}
 
-	if body.Data.NextCursor != "" {
-		t.Errorf("expected no next cursor, got %s", body.Data.NextCursor)
+	if body.NextCursor != "" {
+		t.Errorf("expected no next cursor, got %s", body.NextCursor)
 	}
 }
 
@@ -321,27 +313,25 @@ func TestWalletHandlerLedgerReturnsNextCursor(t *testing.T) {
 	}
 
 	var body struct {
-		Data struct {
-			Entries []struct {
-				ID string `json:"id"`
-			} `json:"entries"`
-			NextCursor string `json:"nextCursor"`
-		} `json:"data"`
+		Entries []struct {
+			ID string `json:"id"`
+		} `json:"entries"`
+		NextCursor string `json:"nextCursor"`
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
 
-	if len(body.Data.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(body.Data.Entries))
+	if len(body.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(body.Entries))
 	}
 
-	if body.Data.NextCursor == "" {
+	if body.NextCursor == "" {
 		t.Fatal("expected next cursor")
 	}
 
-	createdAt, id, err := decodeLedgerCursor(body.Data.NextCursor)
+	createdAt, id, err := decodeLedgerCursor(body.NextCursor)
 	if err != nil {
 		t.Fatalf("unexpected cursor decode error: %v", err)
 	}
@@ -484,51 +474,49 @@ func TestWalletHandlerReconcileReturnsResult(t *testing.T) {
 	}
 
 	var body struct {
-		Data struct {
-			WalletID string `json:"walletId"`
+		WalletID string `json:"walletId"`
 
-			StoredBalance struct {
-				Amount string `json:"amount"`
-			} `json:"storedBalance"`
+		StoredBalance struct {
+			Amount string `json:"amount"`
+		} `json:"storedBalance"`
 
-			CalculatedBalance struct {
-				Amount string `json:"amount"`
-			} `json:"calculatedBalance"`
+		CalculatedBalance struct {
+			Amount string `json:"amount"`
+		} `json:"calculatedBalance"`
 
-			Difference struct {
-				Amount string `json:"amount"`
-			} `json:"difference"`
+		Difference struct {
+			Amount string `json:"amount"`
+		} `json:"difference"`
 
-			Consistent     bool  `json:"consistent"`
-			CheckedEntries int64 `json:"checkedEntries"`
-		} `json:"data"`
+		Consistent     bool  `json:"consistent"`
+		CheckedEntries int64 `json:"checkedEntries"`
 	}
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("unexpected decode error: %v", err)
 	}
 
-	if body.Data.WalletID != walletID.String() {
-		t.Errorf("expected wallet id %s, got %s", walletID, body.Data.WalletID)
+	if body.WalletID != walletID.String() {
+		t.Errorf("expected wallet id %s, got %s", walletID, body.WalletID)
 	}
 
-	if body.Data.StoredBalance.Amount != "100.00" {
-		t.Errorf("expected stored balance 100.00, got %s", body.Data.StoredBalance.Amount)
+	if body.StoredBalance.Amount != "100.00" {
+		t.Errorf("expected stored balance 100.00, got %s", body.StoredBalance.Amount)
 	}
 
-	if body.Data.CalculatedBalance.Amount != "90.00" {
-		t.Errorf("expected calculated balance 90.00, got %s", body.Data.CalculatedBalance.Amount)
+	if body.CalculatedBalance.Amount != "90.00" {
+		t.Errorf("expected calculated balance 90.00, got %s", body.CalculatedBalance.Amount)
 	}
 
-	if body.Data.Difference.Amount != "10.00" {
-		t.Errorf("expected difference 10.00, got %s", body.Data.Difference.Amount)
+	if body.Difference.Amount != "10.00" {
+		t.Errorf("expected difference 10.00, got %s", body.Difference.Amount)
 	}
 
-	if body.Data.Consistent {
+	if body.Consistent {
 		t.Fatal("expected reconciliation to be inconsistent")
 	}
 
-	if body.Data.CheckedEntries != 3 {
-		t.Errorf("expected 3 checked entries, got %d", body.Data.CheckedEntries)
+	if body.CheckedEntries != 3 {
+		t.Errorf("expected 3 checked entries, got %d", body.CheckedEntries)
 	}
 }

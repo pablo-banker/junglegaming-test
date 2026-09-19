@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -209,46 +211,82 @@ func (r *WalletLedgerRepository) ListByWallet(
 	return entries, nil
 }
 
-// CalculateBalance reconstructs the current wallet balance from its ledger entries.
-func (r *WalletLedgerRepository) CalculateBalance(ctx context.Context, walletID uuid.UUID, currency domain.Currency) (domain.Money, int64, error) {
+// ReconciliationSnapshot reads the stored balance and rebuilds it from the ledger in a
+// single statement, so both values come from the same snapshot without locking the wallet.
+func (r *WalletLedgerRepository) ReconciliationSnapshot(ctx context.Context, walletID uuid.UUID) (*application.ReconciliationSnapshot, error) {
 	const query = `
 		SELECT
+			w.currency,
+			w.balance::text,
 			COALESCE(
 				SUM(
 					CASE
-						WHEN direction = 'CREDIT'
-							THEN amount
-						ELSE -amount
+						WHEN l.direction = 'CREDIT' THEN l.amount
+						ELSE -l.amount
 					END
 				),
 				0
 			)::numeric(20, 2)::text,
-			COUNT(*)
-		FROM wallet_ledger_entries
-		WHERE wallet_id = $1
+			COUNT(l.id)
+		FROM wallets AS w
+		LEFT JOIN wallet_ledger_entries AS l
+			ON l.wallet_id = w.id
+		WHERE w.id = $1
+		GROUP BY w.id
 	`
 
 	var (
-		amount string
-		count  int64
+		currencyCode string
+		stored       string
+		calculated   string
+		count        int64
 	)
 
-	err := db(ctx, r.pool).QueryRow(
-		ctx,
-		query,
-		walletID,
-	).Scan(
-		&amount,
+	err := db(ctx, r.pool).QueryRow(ctx, query, walletID).Scan(
+		&currencyCode,
+		&stored,
+		&calculated,
 		&count,
 	)
 	if err != nil {
-		return domain.Money{}, 0, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrNotFound
+		}
+
+		return nil, err
 	}
 
-	balance, err := domain.ParseMoney(amount, currency)
+	currency, err := domain.NewCurrency(currencyCode)
 	if err != nil {
-		return domain.Money{}, 0, err
+		return nil, err
 	}
 
-	return balance, count, nil
+	storedBalance, err := domain.ParseMoney(stored, currency)
+	if err != nil {
+		return nil, err
+	}
+
+	// The rebuilt balance may be negative when the ledger diverges, so it is parsed as a difference.
+	calculatedBalance, err := parseSignedMoney(calculated, currency)
+	if err != nil {
+		return nil, err
+	}
+
+	return &application.ReconciliationSnapshot{
+		StoredBalance:     storedBalance,
+		CalculatedBalance: calculatedBalance,
+		CheckedEntries:    count,
+	}, nil
+}
+
+// parseSignedMoney parses a persisted amount that may be negative.
+func parseSignedMoney(amount string, currency domain.Currency) (domain.Money, error) {
+	negative := strings.HasPrefix(amount, "-")
+
+	money, err := domain.ParseMoney(strings.TrimPrefix(amount, "-"), currency)
+	if err != nil || !negative {
+		return money, err
+	}
+
+	return money.Negate()
 }

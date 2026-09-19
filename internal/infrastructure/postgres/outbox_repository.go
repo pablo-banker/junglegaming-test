@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 )
@@ -16,14 +15,14 @@ func NewOutboxRepository() *OutboxRepository {
 	return &OutboxRepository{}
 }
 
-// Create persists an event in the transactional outbox.
-func (r *OutboxRepository) Create(ctx context.Context, event application.EventEnvelope) error {
+// Create persists an event snapshot in the transactional outbox.
+func (r *OutboxRepository) Create(ctx context.Context, event application.OutboxEvent) error {
 	tx, ok := txFromContext(ctx)
 	if !ok {
 		return ErrTransactionRequired
 	}
 
-	payload, err := json.Marshal(event.Payload)
+	envelope, err := event.Envelope()
 	if err != nil {
 		return err
 	}
@@ -54,14 +53,14 @@ func (r *OutboxRepository) Create(ctx context.Context, event application.EventEn
 	_, err = tx.Exec(
 		ctx,
 		query,
-		event.EventID,
-		event.EventType,
-		event.AggregateID,
-		event.CorrelationID,
-		nullableString(event.CausationID),
-		event.Version,
-		payload,
-		event.OccurredAt,
+		envelope.EventID,
+		envelope.EventType,
+		envelope.AggregateID,
+		envelope.CorrelationID,
+		nullableString(envelope.CausationID),
+		envelope.Version,
+		envelope.Data,
+		envelope.OccurredAt,
 	)
 
 	return err
