@@ -1,352 +1,262 @@
-//go:build unit
-
 package sqs
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+
+	"github.com/pablo-banker/junglegaming-test/internal/application"
 )
+
+type visibilityChange struct {
+	receipt string
+	timeout int32
+}
 
 type fakeConsumerClient struct {
 	receiveOutput *awssqs.ReceiveMessageOutput
 	receiveErr    error
 	deleteErr     error
+	sendErr       error
 
-	receiveCalls int
-	deleteCalls  int
-
-	receiveInput   *awssqs.ReceiveMessageInput
-	deletedReceipt []string
+	receiveInput      *awssqs.ReceiveMessageInput
+	deletedReceipts   []string
+	visibilityChanges []visibilityChange
+	sent              []*awssqs.SendMessageInput
 }
 
 // ReceiveMessage returns the configured SQS batch.
-func (f *fakeConsumerClient) ReceiveMessage(ctx context.Context, input *awssqs.ReceiveMessageInput, optFns ...func(*awssqs.Options)) (*awssqs.ReceiveMessageOutput, error) {
-	f.receiveCalls++
+func (f *fakeConsumerClient) ReceiveMessage(_ context.Context, input *awssqs.ReceiveMessageInput, _ ...func(*awssqs.Options)) (*awssqs.ReceiveMessageOutput, error) {
 	f.receiveInput = input
 
 	return f.receiveOutput, f.receiveErr
 }
 
 // DeleteMessage records the acknowledged SQS message.
-func (f *fakeConsumerClient) DeleteMessage(ctx context.Context, input *awssqs.DeleteMessageInput, optFns ...func(*awssqs.Options)) (*awssqs.DeleteMessageOutput, error) {
-	f.deleteCalls++
-	f.deletedReceipt = append(f.deletedReceipt, aws.ToString(input.ReceiptHandle))
-
+func (f *fakeConsumerClient) DeleteMessage(_ context.Context, input *awssqs.DeleteMessageInput, _ ...func(*awssqs.Options)) (*awssqs.DeleteMessageOutput, error) {
 	if f.deleteErr != nil {
 		return nil, f.deleteErr
 	}
 
+	f.deletedReceipts = append(f.deletedReceipts, aws.ToString(input.ReceiptHandle))
+
 	return &awssqs.DeleteMessageOutput{}, nil
 }
 
+// ChangeMessageVisibility records the visibility change.
+func (f *fakeConsumerClient) ChangeMessageVisibility(_ context.Context, input *awssqs.ChangeMessageVisibilityInput, _ ...func(*awssqs.Options)) (*awssqs.ChangeMessageVisibilityOutput, error) {
+	f.visibilityChanges = append(f.visibilityChanges, visibilityChange{
+		receipt: aws.ToString(input.ReceiptHandle),
+		timeout: input.VisibilityTimeout,
+	})
+
+	return &awssqs.ChangeMessageVisibilityOutput{}, nil
+}
+
+// SendMessage records the message sent to the DLQ.
+func (f *fakeConsumerClient) SendMessage(_ context.Context, input *awssqs.SendMessageInput, _ ...func(*awssqs.Options)) (*awssqs.SendMessageOutput, error) {
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
+
+	f.sent = append(f.sent, input)
+
+	return &awssqs.SendMessageOutput{}, nil
+}
+
 type fakeWagerMessageHandler struct {
-	calls int
-
-	messageIDs []string
-	bodies     []string
-
-	err        error
+	calls      int
 	errorsByID map[string]error
 }
 
-// Handle records the wager message processing call.
-func (f *fakeWagerMessageHandler) Handle(_ context.Context, messageID string, body string) error {
+// Handle returns the configured result for the message.
+func (f *fakeWagerMessageHandler) Handle(_ context.Context, messageID string, _ string) error {
 	f.calls++
-	f.messageIDs = append(f.messageIDs, messageID)
-	f.bodies = append(f.bodies, body)
 
-	if err, ok := f.errorsByID[messageID]; ok {
-		return err
-	}
-
-	return f.err
+	return f.errorsByID[messageID]
 }
 
 // newConsumerForTest creates a consumer with fake dependencies.
-func newConsumerForTest() (*Consumer, *fakeConsumerClient, *fakeWagerMessageHandler) {
+func newConsumerForTest(messages ...types.Message) (*Consumer, *fakeConsumerClient, *fakeWagerMessageHandler) {
 	client := &fakeConsumerClient{
-		receiveOutput: &awssqs.ReceiveMessageOutput{},
+		receiveOutput: &awssqs.ReceiveMessageOutput{Messages: messages},
 	}
 
-	handler := &fakeWagerMessageHandler{}
+	handler := &fakeWagerMessageHandler{errorsByID: map[string]error{}}
 
 	consumer := &Consumer{
 		client:   client,
 		handler:  handler,
 		queueURL: "http://localhost:4566/000000000000/wager-transactions.fifo",
+		dlqURL:   "http://localhost:4566/000000000000/wager-transactions-dlq.fifo",
+		logger:   slog.New(slog.DiscardHandler),
 	}
 
 	return consumer, client, handler
 }
 
-// TestConsumerProcessesAndDeletesMessage verifies successful messages are acknowledged.
-func TestConsumerProcessesAndDeletesMessage(t *testing.T) {
-	consumer, client, handler := newConsumerForTest()
-
-	client.receiveOutput.Messages = []types.Message{
-		{
-			MessageId:     aws.String("message-1"),
-			Body:          aws.String(`{"type":"BET"}`),
-			ReceiptHandle: aws.String("receipt-1"),
+// testMessage creates an SQS message delivered receiveCount times.
+func testMessage(id string, receiveCount int) types.Message {
+	return types.Message{
+		MessageId:     aws.String(id),
+		Body:          aws.String(`{"messageId":"` + id + `"}`),
+		ReceiptHandle: aws.String("receipt-" + id),
+		Attributes: map[string]string{
+			string(types.MessageSystemAttributeNameApproximateReceiveCount): fmt.Sprint(receiveCount),
+			string(types.MessageSystemAttributeNameMessageGroupId):          "wallet-1",
 		},
-	}
-
-	err := consumer.PollOnce(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected poll error: %v", err)
-	}
-
-	if handler.calls != 1 {
-		t.Fatalf("expected 1 handler call, got %d", handler.calls)
-	}
-
-	if client.deleteCalls != 1 {
-		t.Fatalf("expected 1 delete call, got %d", client.deleteCalls)
-	}
-
-	if handler.messageIDs[0] != "message-1" {
-		t.Errorf("expected message-1, got %s", handler.messageIDs[0])
-	}
-
-	if client.deletedReceipt[0] != "receipt-1" {
-		t.Errorf("expected receipt-1, got %s", client.deletedReceipt[0])
 	}
 }
 
-// TestConsumerDoesNotDeleteFailedMessage verifies failed processing remains available for retry.
-func TestConsumerDoesNotDeleteFailedMessage(t *testing.T) {
-	consumer, client, handler := newConsumerForTest()
+// TestConsumerDeletesProcessedMessages verifies successful messages are acknowledged.
+func TestConsumerDeletesProcessedMessages(t *testing.T) {
+	consumer, client, _ := newConsumerForTest(testMessage("m1", 1), testMessage("m2", 1))
 
-	handler.err = errors.New("processing failed")
-
-	client.receiveOutput.Messages = []types.Message{
-		{
-			MessageId:     aws.String("message-1"),
-			Body:          aws.String(`{"type":"BET"}`),
-			ReceiptHandle: aws.String("receipt-1"),
-		},
+	found, err := consumer.PollOnce(context.Background(), context.Background())
+	if err != nil || !found {
+		t.Fatalf("expected processed batch, got %v %v", found, err)
 	}
 
-	err := consumer.PollOnce(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected poll error: %v", err)
-	}
-
-	if handler.calls != 1 {
-		t.Fatalf("expected 1 handler call, got %d", handler.calls)
-	}
-
-	if client.deleteCalls != 0 {
-		t.Fatalf("expected no delete calls, got %d", client.deleteCalls)
+	if len(client.deletedReceipts) != 2 {
+		t.Fatalf("expected 2 deleted messages, got %d", len(client.deletedReceipts))
 	}
 }
 
-// TestConsumerReturnsReceiveError verifies SQS receive failures abort the poll.
-func TestConsumerReturnsReceiveError(t *testing.T) {
-	consumer, client, handler := newConsumerForTest()
+// TestConsumerRequestsFIFOAttributes verifies long polling and the attributes used for retries and DLQ moves.
+func TestConsumerRequestsFIFOAttributes(t *testing.T) {
+	consumer, client, _ := newConsumerForTest()
 
-	expectedErr := errors.New("receive failed")
-	client.receiveErr = expectedErr
+	if _, err := consumer.PollOnce(context.Background(), context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	err := consumer.PollOnce(context.Background())
+	input := client.receiveInput
 
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected receive error, got %v", err)
+	if input.WaitTimeSeconds != receiveWaitSeconds || input.MaxNumberOfMessages != receiveBatchSize {
+		t.Fatalf("unexpected receive settings: wait %d batch %d", input.WaitTimeSeconds, input.MaxNumberOfMessages)
+	}
+
+	if len(input.MessageSystemAttributeNames) != 2 {
+		t.Fatalf("expected receive count and group id attributes, got %v", input.MessageSystemAttributeNames)
+	}
+}
+
+// TestConsumerDelaysTransientFailuresWithBackoff verifies transient failures are retried with backoff.
+func TestConsumerDelaysTransientFailuresWithBackoff(t *testing.T) {
+	consumer, client, handler := newConsumerForTest(testMessage("m1", 3), testMessage("m2", 1))
+
+	handler.errorsByID["m1"] = fmt.Errorf("%w: connection refused", application.ErrUnavailable)
+
+	_, err := consumer.PollOnce(context.Background(), context.Background())
+	if !errors.Is(err, application.ErrUnavailable) {
+		t.Fatalf("expected transient error, got %v", err)
+	}
+
+	if handler.calls != 1 {
+		t.Fatalf("expected processing to stop after the transient failure, got %d calls", handler.calls)
+	}
+
+	if len(client.deletedReceipts) != 0 || len(client.sent) != 0 {
+		t.Fatal("expected transient failures to stay in the queue")
+	}
+
+	expected := []visibilityChange{
+		{receipt: "receipt-m1", timeout: int32((20 * time.Second).Seconds())},
+		{receipt: "receipt-m2", timeout: int32((5 * time.Second).Seconds())},
+	}
+
+	if len(client.visibilityChanges) != len(expected) {
+		t.Fatalf("expected %d visibility changes, got %v", len(expected), client.visibilityChanges)
+	}
+
+	for i, change := range expected {
+		if client.visibilityChanges[i] != change {
+			t.Errorf("expected %v, got %v", change, client.visibilityChanges[i])
+		}
+	}
+}
+
+// TestConsumerMovesPermanentFailuresToDLQ verifies permanent failures reach the DLQ at once.
+func TestConsumerMovesPermanentFailuresToDLQ(t *testing.T) {
+	consumer, client, handler := newConsumerForTest(testMessage("m1", 1), testMessage("m2", 1))
+
+	handler.errorsByID["m1"] = application.ErrIdempotencyConflict
+
+	if _, err := consumer.PollOnce(context.Background(), context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(client.sent) != 1 {
+		t.Fatalf("expected 1 DLQ message, got %d", len(client.sent))
+	}
+
+	dlq := client.sent[0]
+
+	if aws.ToString(dlq.QueueUrl) != consumer.dlqURL ||
+		aws.ToString(dlq.MessageGroupId) != "wallet-1" ||
+		aws.ToString(dlq.MessageDeduplicationId) != "m1" {
+		t.Fatalf("unexpected DLQ message: %+v", dlq)
+	}
+
+	if reason := aws.ToString(dlq.MessageAttributes[failureReasonAttribute].StringValue); reason != application.ErrIdempotencyConflict.Error() {
+		t.Errorf("expected failure reason, got %q", reason)
+	}
+
+	if len(client.deletedReceipts) != 2 {
+		t.Fatalf("expected both messages removed from the source queue, got %v", client.deletedReceipts)
+	}
+}
+
+// TestConsumerReleasesUnstartedMessagesOnShutdown verifies received messages are handed back on shutdown.
+func TestConsumerReleasesUnstartedMessagesOnShutdown(t *testing.T) {
+	consumer, client, handler := newConsumerForTest(testMessage("m1", 1), testMessage("m2", 1))
+
+	stop, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := consumer.PollOnce(stop, context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if handler.calls != 0 {
-		t.Fatalf("expected no handler calls, got %d", handler.calls)
+		t.Fatalf("expected no processing after shutdown started, got %d", handler.calls)
 	}
 
-	if client.deleteCalls != 0 {
-		t.Fatalf("expected no delete calls, got %d", client.deleteCalls)
+	if len(client.visibilityChanges) != 2 || client.visibilityChanges[0].timeout != 0 {
+		t.Fatalf("expected messages released with visibility 0, got %v", client.visibilityChanges)
 	}
 }
 
-// TestConsumerUsesFIFOQueueConfiguration verifies the expected queue polling configuration.
-func TestConsumerUsesFIFOQueueConfiguration(t *testing.T) {
+// TestConsumerReturnsReceiveError verifies SQS receive failures reach the worker backoff.
+func TestConsumerReturnsReceiveError(t *testing.T) {
 	consumer, client, _ := newConsumerForTest()
 
-	err := consumer.PollOnce(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected poll error: %v", err)
-	}
+	client.receiveErr = errors.New("sqs unavailable")
 
-	if client.receiveInput == nil {
-		t.Fatal("expected receive input")
-	}
-
-	if aws.ToString(client.receiveInput.QueueUrl) != consumer.queueURL {
-		t.Errorf("expected queue URL %s, got %s", consumer.queueURL, aws.ToString(client.receiveInput.QueueUrl))
-	}
-
-	if client.receiveInput.MaxNumberOfMessages != 10 {
-		t.Errorf("expected max 10 messages, got %d", client.receiveInput.MaxNumberOfMessages)
-	}
-
-	if client.receiveInput.WaitTimeSeconds != 10 {
-		t.Errorf("expected wait time 10 seconds, got %d", client.receiveInput.WaitTimeSeconds)
+	if _, err := consumer.PollOnce(context.Background(), context.Background()); err == nil {
+		t.Fatal("expected receive error")
 	}
 }
 
-// TestConsumerRejectsInvalidMessages verifies malformed SQS metadata never reaches the handler.
-func TestConsumerRejectsInvalidMessages(t *testing.T) {
-	tests := []struct {
-		name    string
-		message types.Message
-		wantErr error
-	}{
-		{
-			name: "empty message id",
-			message: types.Message{
-				Body:          aws.String(`{"type":"BET"}`),
-				ReceiptHandle: aws.String("receipt-1"),
-			},
-			wantErr: ErrInvalidSQSMessageID,
-		},
-		{
-			name: "blank message id",
-			message: types.Message{
-				MessageId:     aws.String("   "),
-				Body:          aws.String(`{"type":"BET"}`),
-				ReceiptHandle: aws.String("receipt-1"),
-			},
-			wantErr: ErrInvalidSQSMessageID,
-		},
-		{
-			name: "empty body",
-			message: types.Message{
-				MessageId:     aws.String("message-1"),
-				ReceiptHandle: aws.String("receipt-1"),
-			},
-			wantErr: ErrInvalidSQSBody,
-		},
-		{
-			name: "blank body",
-			message: types.Message{
-				MessageId:     aws.String("message-1"),
-				Body:          aws.String("   "),
-				ReceiptHandle: aws.String("receipt-1"),
-			},
-			wantErr: ErrInvalidSQSBody,
-		},
-		{
-			name: "empty receipt handle",
-			message: types.Message{
-				MessageId: aws.String("message-1"),
-				Body:      aws.String(`{"type":"BET"}`),
-			},
-			wantErr: ErrInvalidReceipt,
-		},
-		{
-			name: "blank receipt handle",
-			message: types.Message{
-				MessageId:     aws.String("message-1"),
-				Body:          aws.String(`{"type":"BET"}`),
-				ReceiptHandle: aws.String("   "),
-			},
-			wantErr: ErrInvalidReceipt,
-		},
+// TestRetryDelayGrowsExponentially verifies the visibility backoff and its cap.
+func TestRetryDelayGrowsExponentially(t *testing.T) {
+	tests := map[int]time.Duration{
+		1:  5 * time.Second,
+		2:  10 * time.Second,
+		4:  40 * time.Second,
+		20: retryMaxDelay,
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			consumer, client, handler := newConsumerForTest()
-
-			err := consumer.processMessage(context.Background(), tt.message)
-
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected %v, got %v", tt.wantErr, err)
-			}
-
-			if handler.calls != 0 {
-				t.Fatalf("expected no handler calls, got %d", handler.calls)
-			}
-
-			if client.deleteCalls != 0 {
-				t.Fatalf("expected no delete calls, got %d", client.deleteCalls)
-			}
-		})
-	}
-}
-
-// TestConsumerContinuesBatchAfterMessageFailure verifies one poison message does not block the batch.
-func TestConsumerContinuesBatchAfterMessageFailure(t *testing.T) {
-	consumer, client, handler := newConsumerForTest()
-
-	handler.errorsByID = map[string]error{
-		"message-2": errors.New("processing failed"),
-	}
-
-	client.receiveOutput.Messages = []types.Message{
-		{
-			MessageId:     aws.String("message-1"),
-			Body:          aws.String(`{"sequence":1}`),
-			ReceiptHandle: aws.String("receipt-1"),
-		},
-		{
-			MessageId:     aws.String("message-2"),
-			Body:          aws.String(`{"sequence":2}`),
-			ReceiptHandle: aws.String("receipt-2"),
-		},
-		{
-			MessageId:     aws.String("message-3"),
-			Body:          aws.String(`{"sequence":3}`),
-			ReceiptHandle: aws.String("receipt-3"),
-		},
-	}
-
-	err := consumer.PollOnce(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected poll error: %v", err)
-	}
-
-	if handler.calls != 3 {
-		t.Fatalf("expected 3 handler calls, got %d", handler.calls)
-	}
-
-	if client.deleteCalls != 2 {
-		t.Fatalf("expected 2 delete calls, got %d", client.deleteCalls)
-	}
-
-	if client.deletedReceipt[0] != "receipt-1" {
-		t.Errorf("expected first deleted receipt receipt-1, got %s", client.deletedReceipt[0])
-	}
-
-	if client.deletedReceipt[1] != "receipt-3" {
-		t.Errorf("expected second deleted receipt receipt-3, got %s", client.deletedReceipt[1])
-	}
-}
-
-// TestConsumerReturnsDeleteError verifies acknowledgment failures are propagated by message processing.
-func TestConsumerReturnsDeleteError(t *testing.T) {
-	consumer, client, handler := newConsumerForTest()
-
-	expectedErr := errors.New("delete failed")
-	client.deleteErr = expectedErr
-
-	message := types.Message{
-		MessageId:     aws.String("message-1"),
-		Body:          aws.String(`{"type":"BET"}`),
-		ReceiptHandle: aws.String("receipt-1"),
-	}
-
-	err := consumer.processMessage(context.Background(), message)
-
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected delete error, got %v", err)
-	}
-
-	if handler.calls != 1 {
-		t.Fatalf("expected 1 handler call, got %d", handler.calls)
-	}
-
-	if client.deleteCalls != 1 {
-		t.Fatalf("expected 1 delete call, got %d", client.deleteCalls)
+	for count, want := range tests {
+		if got := retryDelay(testMessage("m", count)); got != want {
+			t.Errorf("receive count %d: expected %s, got %s", count, want, got)
+		}
 	}
 }

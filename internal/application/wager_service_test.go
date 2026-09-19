@@ -1,5 +1,3 @@
-//go:build unit
-
 package application
 
 import (
@@ -106,6 +104,7 @@ func newWagerServiceForTest() (
 		wagers,
 		ledger,
 		outbox,
+		DefaultReferenceRetryPolicy(),
 	)
 
 	return service, txManager, wallets, wagers, ledger, outbox
@@ -328,10 +327,10 @@ func TestWagerServiceRejectsBetWithInsufficientFunds(t *testing.T) {
 		t.Errorf("expected REJECTED, got %s", result.Status)
 	}
 
-	if result.FailureCode != failureCodeBetInsufficientFunds {
+	if result.FailureCode != FailureCodeBetInsufficientFunds {
 		t.Errorf(
 			"expected %s, got %s",
-			failureCodeBetInsufficientFunds,
+			FailureCodeBetInsufficientFunds,
 			result.FailureCode,
 		)
 	}
@@ -388,10 +387,11 @@ func TestWagerServiceRejectsBetWithInsufficientFunds(t *testing.T) {
 
 // TestWagerServiceMarksMissingReferenceAsPending verifies durable missing-reference handling.
 func TestWagerServiceMarksMissingReferenceAsPending(t *testing.T) {
-	service, _, _, wagers, ledger, outbox :=
+	service, _, wallets, wagers, ledger, outbox :=
 		newWagerServiceForTest()
 
 	wallet := mustApplicationWallet(t, "100.00")
+	wallets.findByIDForUpdateResult = wallet
 
 	command := validProcessWagerCommand(wallet)
 	command.Type = "REFUND"
@@ -427,11 +427,11 @@ func TestWagerServiceMarksMissingReferenceAsPending(t *testing.T) {
 	update := wagers.pendingReferenceUpdates[0]
 
 	expectedNextAttempt := wagerServiceTestTime.Add(
-		initialReferenceRetryDelay,
+		DefaultReferenceRetryPolicy().InitialDelay,
 	)
 
 	expectedExpiration := wagerServiceTestTime.Add(
-		referenceRetryTTL,
+		DefaultReferenceRetryPolicy().TTL,
 	)
 
 	if !update.nextAttemptAt.Equal(expectedNextAttempt) {
@@ -572,16 +572,12 @@ func TestWagerServiceReturnsIdempotentReplay(t *testing.T) {
 	wallet := mustApplicationWallet(t, "75.00")
 	command := validProcessWagerCommand(wallet)
 
-	payloadHash, err := calculateWagerPayloadHash(
-		command,
-		wallet.ID(),
-		wallet.PlayerID(),
-		domain.WagerTransactionTypeBet,
-		mustApplicationMoney(t, "25.00"),
-	)
+	request, err := parseWagerRequest(command)
 	if err != nil {
-		t.Fatalf("unexpected hash error: %v", err)
+		t.Fatalf("unexpected request error: %v", err)
 	}
+
+	payloadHash := request.payloadHash
 
 	before := mustApplicationMoney(t, "100.00")
 	after := mustApplicationMoney(t, "75.00")
@@ -915,5 +911,136 @@ func TestWagerServiceGetByExternalTransactionIDPropagatesRepositoryError(t *test
 
 	if result != nil {
 		t.Fatal("expected nil result")
+	}
+}
+
+// TestWagerServiceRejectsReferenceMismatch verifies a mismatching reference is a persisted rejection.
+func TestWagerServiceRejectsReferenceMismatch(t *testing.T) {
+	service, _, wallets, wagers, ledger, outbox := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	wallets.findByIDForUpdateResult = wallet
+	wagers.findByProviderExternalResult = mustApplicationProcessedWager(t, wallet, "provider-a", "bet-123")
+
+	command := validProcessWagerCommand(wallet)
+	command.Type = "REFUND"
+	command.Amount = "30.00"
+	command.ReferenceExternalTransactionID = "bet-123"
+
+	result, err := service.Process(context.Background(), command, CommandMetadata{CorrelationID: "correlation-123"})
+	if err != nil {
+		t.Fatalf("expected a persisted rejection, got error %v", err)
+	}
+
+	if result.Status != domain.WagerTransactionStatusRejected || result.FailureCode != FailureCodeReferenceMismatch {
+		t.Fatalf("expected REJECTED %s, got %s %s", FailureCodeReferenceMismatch, result.Status, result.FailureCode)
+	}
+
+	if wallet.Balance().Amount() != "75.00" || len(ledger.created) != 0 {
+		t.Fatal("expected no wallet movement for a rejected reference")
+	}
+
+	if len(outbox.created) != 1 || outbox.created[0].EventType != EventTypeWagerTransactionRejected {
+		t.Fatalf("expected one WagerTransactionRejected event, got %d", len(outbox.created))
+	}
+}
+
+// TestReferenceRetryPolicyBacksOffExponentially verifies retry delays and the expiration cap.
+func TestReferenceRetryPolicyBacksOffExponentially(t *testing.T) {
+	policy := DefaultReferenceRetryPolicy()
+
+	expected := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second}
+	for i, want := range expected {
+		if got := policy.delay(i + 1); got != want {
+			t.Errorf("attempt %d: expected %s, got %s", i+1, want, got)
+		}
+	}
+
+	if got := policy.delay(50); got != policy.MaxDelay {
+		t.Errorf("expected delay capped at %s, got %s", policy.MaxDelay, got)
+	}
+
+	expiresAt := wagerServiceTestTime.Add(time.Second)
+	if got := policy.nextAttemptAt(wagerServiceTestTime, expiresAt, 10); !got.Equal(expiresAt) {
+		t.Errorf("expected next attempt capped at expiration %s, got %s", expiresAt, got)
+	}
+}
+
+// newPendingRefundWork creates a locked PENDING_REFERENCE refund for worker tests.
+func newPendingRefundWork(t *testing.T, wallet *domain.Wallet) *PendingReferenceWork {
+	t.Helper()
+
+	createdAt := wagerServiceTestTime.Add(-time.Minute)
+
+	transaction, err := domain.RehydrateWagerTransaction(domain.RehydrateWagerTransactionParams{
+		ID:                             uuid.New(),
+		ProviderID:                     "provider-a",
+		ExternalTransactionID:          "refund-123",
+		IdempotencyKey:                 "provider-a:refund-123",
+		PayloadHash:                    "payload-hash",
+		WalletID:                       wallet.ID(),
+		PlayerID:                       wallet.PlayerID(),
+		RoundID:                        "round-123",
+		GameID:                         "game-123",
+		Type:                           domain.WagerTransactionTypeRefund,
+		Amount:                         mustApplicationMoney(t, "25.00"),
+		ReferenceExternalTransactionID: "bet-123",
+		Status:                         domain.WagerTransactionStatusPendingReference,
+		CreatedAt:                      createdAt,
+		UpdatedAt:                      createdAt,
+	})
+	if err != nil {
+		t.Fatalf("unexpected pending refund error: %v", err)
+	}
+
+	return &PendingReferenceWork{
+		Transaction: transaction,
+		ExpiresAt:   wagerServiceTestTime.Add(time.Hour),
+		Metadata:    CommandMetadata{CorrelationID: "correlation-123"},
+	}
+}
+
+// TestRetryNextPendingReferenceMarksPermanentFailureAsFailed verifies a deterministic error cannot block the queue.
+func TestRetryNextPendingReferenceMarksPermanentFailureAsFailed(t *testing.T) {
+	service, _, wallets, wagers, _, _ := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	wagers.duePendingReference = newPendingRefundWork(t, wallet)
+	wallets.findByIDForUpdateErr = errors.New("unexpected invariant violation")
+
+	retry, err := service.RetryNextPendingReference(context.Background())
+	if retry == nil || err == nil {
+		t.Fatalf("expected processed work with error, got %v %v", retry, err)
+	}
+
+	if retry.Status != domain.WagerTransactionStatusFailed {
+		t.Errorf("expected FAILED outcome, got %s", retry.Status)
+	}
+
+	if len(wagers.updated) != 1 {
+		t.Fatalf("expected transaction to be finished, got %d updates", len(wagers.updated))
+	}
+
+	failed := wagers.updated[0]
+	if failed.Status() != domain.WagerTransactionStatusFailed || failed.FailureCode() != FailureCodeProcessingFailed {
+		t.Fatalf("expected FAILED %s, got %s %s", FailureCodeProcessingFailed, failed.Status(), failed.FailureCode())
+	}
+}
+
+// TestRetryNextPendingReferenceKeepsTransientFailurePending verifies an unavailable dependency keeps it pending.
+func TestRetryNextPendingReferenceKeepsTransientFailurePending(t *testing.T) {
+	service, _, wallets, wagers, _, _ := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	wagers.duePendingReference = newPendingRefundWork(t, wallet)
+	wallets.findByIDForUpdateErr = ErrUnavailable
+
+	_, err := service.RetryNextPendingReference(context.Background())
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected ErrUnavailable, got %v", err)
+	}
+
+	if len(wagers.updated) != 0 {
+		t.Fatalf("expected no terminal update, got %d", len(wagers.updated))
 	}
 }

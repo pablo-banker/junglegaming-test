@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/postgres"
@@ -77,9 +78,7 @@ func TestInboxRepositoryRecognizesCompletedMessage(t *testing.T) {
 		t.Fatal("expected first registration not to be completed")
 	}
 
-	completedAt := time.Now().UTC()
-
-	err = repository.Complete(context.Background(), consumerName, messageID, completedAt)
+	err = repository.Complete(context.Background(), consumerName, messageID, databaseNow(t, pool))
 	if err != nil {
 		t.Fatalf("unexpected complete error: %v", err)
 	}
@@ -173,12 +172,12 @@ func TestInboxRepositoryCannotCompleteMessageTwice(t *testing.T) {
 		t.Fatalf("unexpected register error: %v", err)
 	}
 
-	err = repository.Complete(context.Background(), consumerName, messageID, time.Now().UTC())
+	err = repository.Complete(context.Background(), consumerName, messageID, databaseNow(t, pool))
 	if err != nil {
 		t.Fatalf("unexpected first complete error: %v", err)
 	}
 
-	err = repository.Complete(context.Background(), consumerName, messageID, time.Now().UTC())
+	err = repository.Complete(context.Background(), consumerName, messageID, databaseNow(t, pool))
 
 	if !errors.Is(err, application.ErrInboxMessageNotFound) {
 		t.Fatalf("expected ErrInboxMessageNotFound, got %v", err)
@@ -249,7 +248,7 @@ func TestInboxRepositoryCommitsRegistrationAndCompletion(t *testing.T) {
 	consumerName := "wager-consumer"
 	messageID := "message-" + uuid.NewString()
 	messageHash := "hash-" + uuid.NewString()
-	completedAt := time.Now().UTC()
+	clock := postgres.NewClock(pool)
 
 	err := transactionManager.WithinTransaction(
 		context.Background(),
@@ -261,6 +260,12 @@ func TestInboxRepositoryCommitsRegistrationAndCompletion(t *testing.T) {
 
 			if alreadyCompleted {
 				t.Fatal("expected new message not to be completed")
+			}
+
+			// The application always uses the database clock, never the host clock.
+			completedAt, err := clock.Now(txCtx)
+			if err != nil {
+				return err
 			}
 
 			return repository.Complete(txCtx, consumerName, messageID, completedAt)
@@ -278,4 +283,16 @@ func TestInboxRepositoryCommitsRegistrationAndCompletion(t *testing.T) {
 	if !alreadyCompleted {
 		t.Fatal("expected committed message to be completed")
 	}
+}
+
+// databaseNow returns the PostgreSQL clock, the only clock the application uses.
+func databaseNow(t *testing.T, pool *pgxpool.Pool) time.Time {
+	t.Helper()
+
+	now, err := postgres.NewClock(pool).Now(context.Background())
+	if err != nil {
+		t.Fatalf("failed to read database time: %v", err)
+	}
+
+	return now
 }

@@ -22,6 +22,13 @@ func NewPool(
 		return nil, fmt.Errorf("failed to parse database url: %w", err)
 	}
 
+	// Bound every wait so a stuck lock or query surfaces as a retryable 503.
+	runtimeParams := poolConfig.ConnConfig.RuntimeParams
+	runtimeParams["application_name"] = "junglegaming"
+	runtimeParams["lock_timeout"] = "5s"
+	runtimeParams["statement_timeout"] = "15s"
+	runtimeParams["idle_in_transaction_session_timeout"] = "30s"
+
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

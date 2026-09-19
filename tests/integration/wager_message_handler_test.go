@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -76,6 +75,7 @@ func TestWagerMessageHandlerRollsBackFinancialProcessing(t *testing.T) {
 		wagerRepository,
 		ledgerRepository,
 		outboxRepository,
+		application.DefaultReferenceRetryPolicy(),
 	)
 
 	expectedErr := errors.New("forced inbox completion failure")
@@ -89,36 +89,23 @@ func TestWagerMessageHandlerRollsBackFinancialProcessing(t *testing.T) {
 		txManager,
 		failingInbox,
 		wagerService,
-		clock,
-	)
+		clock, sqsHandlerConfig(), discardLogger(), nil)
 
 	messageID := "message-" + uuid.NewString()
 	externalTransactionID := "transaction-" + uuid.NewString()
 	idempotencyKey := "key-" + uuid.NewString()
 	correlationID := "correlation-" + uuid.NewString()
 
-	body := fmt.Sprintf(
-		`{
-			"correlationId":"%s",
-			"command":{
-				"providerId":"provider-a",
-				"externalTransactionId":"%s",
-				"idempotencyKey":"%s",
-				"walletId":"%s",
-				"playerId":"%s",
-				"roundId":"round-123",
-				"gameId":"game-123",
-				"type":"BET",
-				"amount":"25.00",
-				"currency":"BRL"
-			}
-		}`,
-		correlationID,
-		externalTransactionID,
-		idempotencyKey,
-		wallet.ID().String(),
-		wallet.PlayerID().String(),
-	)
+	body := wagerRequestedMessageBody(t, wagerRequestedMessage{
+		MessageID:             correlationID,
+		ProviderID:            "provider-a",
+		ExternalTransactionID: externalTransactionID,
+		IdempotencyKey:        idempotencyKey,
+		WalletID:              wallet.ID().String(),
+		PlayerID:              wallet.PlayerID().String(),
+		Kind:                  "BET",
+		Amount:                "25.00",
+	})
 
 	err = handler.Handle(ctx, messageID, body)
 
@@ -136,8 +123,7 @@ func TestWagerMessageHandlerRollsBackFinancialProcessing(t *testing.T) {
 		txManager,
 		inboxRepository,
 		wagerService,
-		clock,
-	)
+		clock, sqsHandlerConfig(), discardLogger(), nil)
 
 	err = retryHandler.Handle(ctx, messageID, body)
 	if err != nil {
@@ -148,7 +134,7 @@ func TestWagerMessageHandlerRollsBackFinancialProcessing(t *testing.T) {
 	assertWagerCount(t, ctx, pool, externalTransactionID, 1)
 	assertLedgerCount(t, ctx, pool, wallet.ID(), 1)
 	assertOutboxExists(t, ctx, pool, correlationID)
-	assertCompletedInbox(t, ctx, pool, messageID)
+	assertCompletedInbox(t, ctx, pool, correlationID)
 }
 
 // assertWalletState verifies the persisted wallet balance and version.

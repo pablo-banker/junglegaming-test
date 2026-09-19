@@ -5,52 +5,62 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/pablo-banker/junglegaming-test/internal/apierrors"
-	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/sqs"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const readinessTimeout = 2 * time.Second
+
+// ReadinessCheck verifies one dependency required to serve traffic.
+type ReadinessCheck struct {
+	Name  string
+	Check func(ctx context.Context) error
+}
+
 type HealthHandler struct {
-	db  *pgxpool.Pool
-	sqs *sqs.HealthChecker
+	checks []ReadinessCheck
 }
 
-type HealthResponse struct {
-	Status string `json:"status"`
+type healthResponse struct {
+	Status string            `json:"status"`
+	Checks map[string]string `json:"checks,omitempty"`
 }
 
-// NewHealthHandler creates a health handler backed by the PostgreSQL pool.
-func NewHealthHandler(db *pgxpool.Pool, sqsHealth *sqs.HealthChecker) *HealthHandler {
+// NewHealthHandler creates the public health handler.
+func NewHealthHandler(checks []ReadinessCheck) *HealthHandler {
 	return &HealthHandler{
-		db:  db,
-		sqs: sqsHealth,
+		checks: checks,
 	}
 }
 
 // Live reports whether the application process is running.
 func (h *HealthHandler) Live(c fiber.Ctx) error {
-	return BuildSuccessResponse(
-		c, fiber.StatusOK, HealthResponse{
-			Status: "ok",
-		},
-	)
+	return c.JSON(healthResponse{
+		Status: "ok",
+	})
 }
 
-// Ready reports whether the application dependencies are available.
+// Ready reports whether every required dependency is reachable.
 func (h *HealthHandler) Ready(c fiber.Ctx) error {
-	ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(c.Context(), readinessTimeout)
 	defer cancel()
 
-	if err := h.db.Ping(ctx); err != nil {
-		return apierrors.ErrPingDB.WithCause(err)
-	}
-
-	if err := h.sqs.Check(ctx); err != nil {
-		return apierrors.ErrSQSUnavailable.WithCause(err)
-	}
-
-	return BuildSuccessResponse(c, fiber.StatusOK, HealthResponse{
+	response := healthResponse{
 		Status: "ready",
-	})
+		Checks: make(map[string]string, len(h.checks)),
+	}
+
+	status := fiber.StatusOK
+
+	for _, check := range h.checks {
+		if err := check.Check(ctx); err != nil {
+			response.Checks[check.Name] = "unavailable"
+			response.Status = "not_ready"
+			status = fiber.StatusServiceUnavailable
+
+			continue
+		}
+
+		response.Checks[check.Name] = "ok"
+	}
+
+	return c.Status(status).JSON(response)
 }

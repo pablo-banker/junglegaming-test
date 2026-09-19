@@ -139,7 +139,7 @@ func TestWalletServiceCreatesZeroBalanceWallet(t *testing.T) {
 	}
 }
 
-// TestWalletServiceCreatesWalletWithOpeningTransaction verifies positive initial balance creates opening financial records.
+// TestWalletServiceCreatesWalletWithOpeningTransaction verifies an opening balance creates financial records.
 func TestWalletServiceCreatesWalletWithOpeningTransaction(t *testing.T) {
 	ctx := integrationContext(t)
 	pool := openIntegrationPool(t)

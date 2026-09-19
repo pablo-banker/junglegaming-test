@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
@@ -86,7 +85,7 @@ func (r *WalletRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.
 	)
 }
 
-// FindByIDForUpdate returns and locks a wallet for financial modification.
+// FindByIDForUpdate locks a wallet with FOR NO KEY UPDATE; FOR UPDATE would deadlock with the FK locks.
 func (r *WalletRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Wallet, error) {
 	tx, ok := txFromContext(ctx)
 	if !ok {
@@ -104,7 +103,7 @@ func (r *WalletRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) 
 			updated_at
 		FROM wallets
 		WHERE id = $1
-		FOR UPDATE
+		FOR NO KEY UPDATE
 	`
 
 	return scanWallet(
@@ -138,8 +137,13 @@ func (r *WalletRepository) FindByPlayerAndCurrency(ctx context.Context, playerID
 	)
 }
 
-// Update persists the mutable financial state of a wallet.
+// Update persists the mutable financial state of a wallet, rejecting a lost update by version.
 func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) error {
+	tx, ok := txFromContext(ctx)
+	if !ok {
+		return ErrTransactionRequired
+	}
+
 	const query = `
 		UPDATE wallets
 		SET
@@ -147,9 +151,10 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 			version = $3,
 			updated_at = $4
 		WHERE id = $1
+		  AND version = $3 - 1
 	`
 
-	result, err := db(ctx, r.pool).Exec(
+	result, err := tx.Exec(
 		ctx,
 		query,
 		wallet.ID(),
@@ -162,7 +167,7 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 	}
 
 	if result.RowsAffected() == 0 {
-		return application.ErrNotFound
+		return application.ErrConcurrentUpdate
 	}
 
 	return nil
@@ -218,12 +223,4 @@ func scanWallet(row pgx.Row) (*domain.Wallet, error) {
 		createdAt,
 		updatedAt,
 	)
-}
-
-// isUniqueViolation reports whether PostgreSQL rejected a unique constraint.
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-
-	return errors.As(err, &pgErr) &&
-		pgErr.Code == "23505"
 }

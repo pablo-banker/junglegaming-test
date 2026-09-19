@@ -1,5 +1,3 @@
-//go:build unit
-
 package application
 
 import (
@@ -153,6 +151,18 @@ type fakeWagerRepository struct {
 
 	hasProcessedDirectReversal    bool
 	hasProcessedDirectReversalErr error
+
+	duePendingReference    *PendingReferenceWork
+	duePendingReferenceErr error
+
+	scheduledRetries []scheduledReferenceRetry
+	scheduleRetryErr error
+}
+
+type scheduledReferenceRetry struct {
+	transactionID uuid.UUID
+	retryCount    int
+	nextAttemptAt time.Time
 }
 
 // Create records a wager transaction creation.
@@ -189,6 +199,7 @@ func (f *fakeWagerRepository) UpdatePendingReference(
 	transaction *domain.WagerTransaction,
 	nextAttemptAt time.Time,
 	expiresAt time.Time,
+	_ CommandMetadata,
 ) error {
 	if f.updatePendingReferenceErr != nil {
 		return f.updatePendingReferenceErr
@@ -256,9 +267,58 @@ func (f *fakeWagerRepository) HasProcessedDirectReversal(
 	return f.hasProcessedDirectReversal, nil
 }
 
+// FindDuePendingReferenceForUpdate returns the configured pending reference work.
+func (f *fakeWagerRepository) FindDuePendingReferenceForUpdate(
+	context.Context,
+	time.Time,
+) (*PendingReferenceWork, error) {
+	if f.duePendingReferenceErr != nil {
+		return nil, f.duePendingReferenceErr
+	}
+
+	if f.duePendingReference == nil {
+		return nil, ErrNotFound
+	}
+
+	return f.duePendingReference, nil
+}
+
+// FindPendingReferenceForUpdate returns the configured pending reference work by id.
+func (f *fakeWagerRepository) FindPendingReferenceForUpdate(
+	_ context.Context,
+	transactionID uuid.UUID,
+) (*PendingReferenceWork, error) {
+	if f.duePendingReference == nil || f.duePendingReference.Transaction.ID() != transactionID {
+		return nil, ErrNotFound
+	}
+
+	return f.duePendingReference, nil
+}
+
+// SchedulePendingReferenceRetry records a pending reference retry schedule.
+func (f *fakeWagerRepository) SchedulePendingReferenceRetry(
+	_ context.Context,
+	transactionID uuid.UUID,
+	retryCount int,
+	nextAttemptAt time.Time,
+) error {
+	if f.scheduleRetryErr != nil {
+		return f.scheduleRetryErr
+	}
+
+	f.scheduledRetries = append(f.scheduledRetries, scheduledReferenceRetry{
+		transactionID: transactionID,
+		retryCount:    retryCount,
+		nextAttemptAt: nextAttemptAt,
+	})
+
+	return nil
+}
+
 type fakeLedgerRepository struct {
 	created           []*domain.WalletLedgerEntry
 	listed            []*domain.WalletLedgerEntry
+	storedBalance     domain.Money
 	calculatedBalance domain.Money
 	calculatedCount   int64
 
@@ -300,17 +360,20 @@ func (f *fakeLedgerRepository) ListByWallet(
 	return f.created, nil
 }
 
-// CalculateBalance returns the configured reconstructed wallet balance.
-func (f *fakeLedgerRepository) CalculateBalance(
+// ReconciliationSnapshot returns the configured stored and reconstructed balances.
+func (f *fakeLedgerRepository) ReconciliationSnapshot(
 	_ context.Context,
 	_ uuid.UUID,
-	_ domain.Currency,
-) (domain.Money, int64, error) {
+) (*ReconciliationSnapshot, error) {
 	if f.calculateErr != nil {
-		return domain.Money{}, 0, f.calculateErr
+		return nil, f.calculateErr
 	}
 
-	return f.calculatedBalance, f.calculatedCount, nil
+	return &ReconciliationSnapshot{
+		StoredBalance:     f.storedBalance,
+		CalculatedBalance: f.calculatedBalance,
+		CheckedEntries:    f.calculatedCount,
+	}, nil
 }
 
 type fakeOutboxRepository struct {
@@ -318,16 +381,21 @@ type fakeOutboxRepository struct {
 	err     error
 }
 
-// Create records an outbox event.
+// Create records the outbox snapshot of an event.
 func (f *fakeOutboxRepository) Create(
 	_ context.Context,
-	event EventEnvelope,
+	event OutboxEvent,
 ) error {
 	if f.err != nil {
 		return f.err
 	}
 
-	f.created = append(f.created, event)
+	envelope, err := event.Envelope()
+	if err != nil {
+		return err
+	}
+
+	f.created = append(f.created, envelope)
 
 	return nil
 }

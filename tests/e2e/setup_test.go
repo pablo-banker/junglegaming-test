@@ -20,14 +20,10 @@ const (
 	defaultRealm       = "junglegaming"
 )
 
-type successResponse[T any] struct {
-	Data T `json:"data"`
-}
-
 type errorResponse struct {
-	Status int    `json:"status"`
-	Code   string `json:"code"`
-	Error  string `json:"error"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details string `json:"details,omitempty"`
 }
 
 type moneyResponse struct {
@@ -189,17 +185,17 @@ func doJSON(t *testing.T, method string, path string, token string, idempotencyK
 	return response
 }
 
-// decodeSuccess decodes the standard successful response envelope.
+// decodeSuccess decodes a successful response body.
 func decodeSuccess[T any](t *testing.T, response *http.Response) T {
 	t.Helper()
 
 	defer response.Body.Close()
 
-	var body successResponse[T]
+	var body T
 
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	return body.Data
+	return body
 }

@@ -1,9 +1,11 @@
 package postgres
 
 import (
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
+	"github.com/pablo-banker/junglegaming-test/internal/observability"
 )
 
 // Module provides PostgreSQL infrastructure dependencies.
@@ -13,9 +15,11 @@ var Module = fx.Module(
 		NewPool,
 
 		fx.Annotate(
-			NewTransactionManager,
+			newObservedTransactionManager,
 			fx.As(new(application.TransactionManager)),
 		),
+
+		NewBacklogRepository,
 
 		fx.Annotate(
 			NewClock,
@@ -41,8 +45,22 @@ var Module = fx.Module(
 			NewOutboxRepository,
 			fx.As(new(application.OutboxRepository)),
 		),
-		fx.Annotate(NewInboxRepository,
+		fx.Annotate(
+			NewInboxRepository,
 			fx.As(new(application.InboxRepository)),
+		),
+
+		fx.Annotate(
+			NewOutboxDispatcherRepository,
+			fx.As(new(application.OutboxDispatcherRepository)),
 		),
 	),
 )
+
+// newObservedTransactionManager counts transactions retried after concurrency conflicts.
+func newObservedTransactionManager(pool *pgxpool.Pool, metrics *observability.Metrics) *TransactionManager {
+	manager := NewTransactionManager(pool)
+	manager.onRetry = metrics.CountTransactionRetry
+
+	return manager
+}

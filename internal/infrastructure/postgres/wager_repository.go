@@ -197,7 +197,6 @@ func (r *WagerRepository) Update(ctx context.Context, transaction *domain.WagerT
 }
 
 // UpdatePendingReference persists reference retry scheduling information.
-// UpdatePendingReference persists reference retry scheduling information.
 func (r *WagerRepository) UpdatePendingReference(
 	ctx context.Context,
 	transaction *domain.WagerTransaction,
@@ -322,18 +321,38 @@ func (r *WagerRepository) FindDuePendingReferenceForUpdate(
 			reference_causation_id
 		FROM wager_transactions
 		WHERE status = 'PENDING_REFERENCE'
-		  AND (
-			  next_reference_attempt_at <= $1
-			  OR reference_expires_at <= $1
-		  )
-		  AND reference_expires_at IS NOT NULL
-		ORDER BY
-			LEAST(next_reference_attempt_at, reference_expires_at),
-			created_at
+		  AND next_reference_attempt_at <= $1
+		ORDER BY next_reference_attempt_at, created_at
 		FOR UPDATE SKIP LOCKED
 		LIMIT 1
 	`
 
+	return r.scanPendingReferenceWork(ctx, db(ctx, r.pool).QueryRow(ctx, query, now))
+}
+
+// FindPendingReferenceForUpdate locks a transaction that is still waiting for its reference.
+func (r *WagerRepository) FindPendingReferenceForUpdate(
+	ctx context.Context,
+	transactionID uuid.UUID,
+) (*application.PendingReferenceWork, error) {
+	const query = `
+		SELECT
+			id,
+			reference_retry_count,
+			reference_expires_at,
+			reference_correlation_id,
+			reference_causation_id
+		FROM wager_transactions
+		WHERE id = $1
+		  AND status = 'PENDING_REFERENCE'
+		FOR UPDATE
+	`
+
+	return r.scanPendingReferenceWork(ctx, db(ctx, r.pool).QueryRow(ctx, query, transactionID))
+}
+
+// scanPendingReferenceWork loads the locked transaction and its retry state.
+func (r *WagerRepository) scanPendingReferenceWork(ctx context.Context, row pgx.Row) (*application.PendingReferenceWork, error) {
 	var (
 		transactionID uuid.UUID
 		retryCount    int
@@ -342,11 +361,7 @@ func (r *WagerRepository) FindDuePendingReferenceForUpdate(
 		causationID   *string
 	)
 
-	err := db(ctx, r.pool).QueryRow(
-		ctx,
-		query,
-		now,
-	).Scan(
+	err := row.Scan(
 		&transactionID,
 		&retryCount,
 		&expiresAt,
@@ -389,7 +404,7 @@ func (r *WagerRepository) SchedulePendingReferenceRetry(
 		SET
 			reference_retry_count = $2,
 			next_reference_attempt_at = $3,
-			updated_at = CURRENT_TIMESTAMP
+			updated_at = clock_timestamp()
 		WHERE id = $1
 		  AND status = 'PENDING_REFERENCE'
 	`

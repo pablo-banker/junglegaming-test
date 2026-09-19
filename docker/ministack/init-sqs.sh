@@ -1,59 +1,79 @@
 #!/bin/bash
+#
+# Provisions the SQS queues used by the service. Safe to run more than once.
+#
+#   wager-transactions.fifo          inbound WagerTransactionRequested messages
+#   wager-transactions-dlq.fifo      inbound messages that failed permanently or ran out of retries
+#   integration-events.fifo          outbound integration events published from the outbox
+#   integration-events-dlq.fifo      outbound events that a downstream consumer could not process
 
-set -e
+set -euo pipefail
 
-REGION="us-east-1"
+REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 ENDPOINT="http://localhost:4566"
 
-DLQ_NAME="wager-transactions-dlq.fifo"
-QUEUE_NAME="wager-transactions.fifo"
-EVENT_QUEUE_NAME="integration-events.fifo"
+# Transient failures back off from 5s up to 5min per attempt, so 10 receives
+# tolerate roughly 20 minutes of dependency outage before reaching the DLQ.
+MAX_RECEIVE_COUNT=10
+VISIBILITY_TIMEOUT=60
+RECEIVE_WAIT_SECONDS=20
+RETENTION_SECONDS=1209600
 
+sqs() {
+  aws --endpoint-url="$ENDPOINT" --region "$REGION" sqs "$@"
+}
 
-
-DLQ_URL=$(aws \
-  --endpoint-url="$ENDPOINT" \
-  --region "$REGION" \
+create_fifo_queue() {
   sqs create-queue \
-  --queue-name "$DLQ_NAME" \
-  --attributes FifoQueue=true \
-  --query QueueUrl \
-  --output text)
+    --queue-name "$1" \
+    --attributes FifoQueue=true \
+    --query QueueUrl \
+    --output text
+}
 
-DLQ_ARN=$(aws \
-  --endpoint-url="$ENDPOINT" \
-  --region "$REGION" \
+queue_arn() {
   sqs get-queue-attributes \
-  --queue-url "$DLQ_URL" \
-  --attribute-names QueueArn \
-  --query 'Attributes.QueueArn' \
-  --output text)
+    --queue-url "$1" \
+    --attribute-names QueueArn \
+    --query 'Attributes.QueueArn' \
+    --output text
+}
 
-QUEUE_URL=$(aws \
-  --endpoint-url="$ENDPOINT" \
-  --region "$REGION" \
-  sqs create-queue \
-  --queue-name "$QUEUE_NAME" \
-  --attributes FifoQueue=true \
-  --query QueueUrl \
-  --output text)
+configure_queue() {
+  local queue_url="$1"
+  local dlq_arn="$2"
+  local attributes
 
-cat > /tmp/redrive-policy.json <<EOF
+  attributes=$(cat <<EOF
 {
-  "RedrivePolicy": "{\"deadLetterTargetArn\":\"${DLQ_ARN}\",\"maxReceiveCount\":\"5\"}"
+  "ContentBasedDeduplication": "false",
+  "VisibilityTimeout": "${VISIBILITY_TIMEOUT}",
+  "ReceiveMessageWaitTimeSeconds": "${RECEIVE_WAIT_SECONDS}",
+  "MessageRetentionPeriod": "${RETENTION_SECONDS}",
+  "RedrivePolicy": "{\"deadLetterTargetArn\":\"${dlq_arn}\",\"maxReceiveCount\":\"${MAX_RECEIVE_COUNT}\"}"
 }
 EOF
+)
 
-aws \
-  --endpoint-url="$ENDPOINT" \
-  --region "$REGION" \
+  sqs set-queue-attributes --queue-url "$queue_url" --attributes "$attributes"
+}
+
+provision() {
+  local queue_name="$1"
+  local dlq_name="$2"
+
+  local dlq_url queue_url
+
+  dlq_url=$(create_fifo_queue "$dlq_name")
   sqs set-queue-attributes \
-  --queue-url "$QUEUE_URL" \
-  --attributes file:///tmp/redrive-policy.json
+    --queue-url "$dlq_url" \
+    --attributes "MessageRetentionPeriod=${RETENTION_SECONDS}"
 
-aws \
-  --endpoint-url="$ENDPOINT" \
-  --region "$REGION" \
-  sqs create-queue \
-  --queue-name "$EVENT_QUEUE_NAME" \
-  --attributes FifoQueue=true
+  queue_url=$(create_fifo_queue "$queue_name")
+  configure_queue "$queue_url" "$(queue_arn "$dlq_url")"
+
+  echo "provisioned ${queue_name} -> ${dlq_name}"
+}
+
+provision "wager-transactions.fifo" "wager-transactions-dlq.fifo"
+provision "integration-events.fifo" "integration-events-dlq.fifo"

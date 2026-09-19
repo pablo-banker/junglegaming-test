@@ -14,6 +14,7 @@ import (
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 	"github.com/pablo-banker/junglegaming-test/internal/domain"
+	"github.com/pablo-banker/junglegaming-test/internal/observability"
 )
 
 const (
@@ -29,13 +30,6 @@ type createWalletRequest struct {
 type moneyRequest struct {
 	Amount   string `json:"amount"`
 	Currency string `json:"currency"`
-}
-
-type createWalletResponse struct {
-	ID       uuid.UUID    `json:"id"`
-	PlayerID uuid.UUID    `json:"playerId"`
-	Balance  domain.Money `json:"balance"`
-	Version  int64        `json:"version"`
 }
 
 type walletResponse struct {
@@ -79,6 +73,7 @@ type ledgerCursor struct {
 type WalletHandler struct {
 	service walletService
 	logger  *slog.Logger
+	metrics *observability.Metrics
 }
 
 type walletService interface {
@@ -89,10 +84,11 @@ type walletService interface {
 }
 
 // NewWalletHandler creates a wallet HTTP handler.
-func NewWalletHandler(service *application.WalletService, logger *slog.Logger) *WalletHandler {
+func NewWalletHandler(service *application.WalletService, logger *slog.Logger, metrics *observability.Metrics) *WalletHandler {
 	return &WalletHandler{
 		service: service,
 		logger:  logger,
+		metrics: metrics,
 	}
 }
 
@@ -101,13 +97,13 @@ func (h *WalletHandler) Create(c fiber.Ctx) error {
 	var request createWalletRequest
 
 	if err := c.Bind().Body(&request); err != nil {
-		return BuildErrorResponse(c, h.logger, ResolveError(fiber.ErrBadRequest))
+		return errInvalidPayload
 	}
 
 	if request.PlayerID == "" ||
 		request.InitialBalance.Amount == "" ||
 		request.InitialBalance.Currency == "" {
-		return BuildErrorResponse(c, h.logger, ResolveError(fiber.ErrBadRequest))
+		return errInvalidPayload.withDetails("playerId and initialBalance are required")
 	}
 
 	result, err := h.service.Create(c.Context(),
@@ -117,14 +113,14 @@ func (h *WalletHandler) Create(c fiber.Ctx) error {
 			InitialBalance: request.InitialBalance.Amount,
 		},
 		application.CommandMetadata{
-			CorrelationID: uuid.NewString(),
+			CorrelationID: correlationID(c),
 		},
 	)
 	if err != nil {
-		return BuildErrorResponse(c, h.logger, ResolveError(err))
+		return err
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusCreated, createWalletResponse{
+	return c.Status(fiber.StatusCreated).JSON(walletResponse{
 		ID:       result.WalletID,
 		PlayerID: result.PlayerID,
 		Balance:  result.Balance,
@@ -139,7 +135,7 @@ func (h *WalletHandler) Get(c fiber.Ctx) error {
 		return err
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusOK, walletResponse{
+	return c.JSON(walletResponse{
 		ID:       result.WalletID,
 		PlayerID: result.PlayerID,
 		Balance:  result.Balance,
@@ -154,7 +150,7 @@ func (h *WalletHandler) Ledger(c fiber.Ctx) error {
 	if rawLimit := c.Query("limit"); rawLimit != "" {
 		parsedLimit, err := strconv.Atoi(rawLimit)
 		if err != nil || parsedLimit < 1 || parsedLimit > maxLedgerLimit {
-			return fiber.ErrBadRequest
+			return errInvalidPayload.withDetails("limit must be between 1 and 100")
 		}
 
 		limit = parsedLimit
@@ -162,7 +158,7 @@ func (h *WalletHandler) Ledger(c fiber.Ctx) error {
 
 	beforeCreatedAt, beforeID, err := decodeLedgerCursor(c.Query("cursor"))
 	if err != nil {
-		return fiber.ErrBadRequest
+		return errInvalidPayload.withDetails("invalid cursor")
 	}
 
 	result, err := h.service.ListLedger(c.Context(), c.Params("walletId"), beforeCreatedAt, beforeID, limit+1)
@@ -210,7 +206,7 @@ func (h *WalletHandler) Ledger(c fiber.Ctx) error {
 		response.NextCursor = nextCursor
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusOK, response)
+	return c.JSON(response)
 }
 
 // Reconcile compares the stored wallet balance with its ledger.
@@ -221,10 +217,18 @@ func (h *WalletHandler) Reconcile(c fiber.Ctx) error {
 	}
 
 	if !result.Consistent {
-		h.logger.WarnContext(c.Context(), "wallet reconciliation divergence detected", slog.String("walletId", result.WalletID.String()))
+		h.metrics.CountReconciliationDivergence()
+		h.logger.ErrorContext(
+			c.Context(),
+			"wallet reconciliation divergence detected",
+			slog.String("walletId", result.WalletID.String()),
+			slog.String("storedBalance", result.StoredBalance.Amount()),
+			slog.String("calculatedBalance", result.CalculatedBalance.Amount()),
+			slog.String("difference", result.Difference.Amount()),
+		)
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusOK, walletReconciliationResponse{
+	return c.JSON(walletReconciliationResponse{
 		WalletID:          result.WalletID,
 		StoredBalance:     result.StoredBalance,
 		CalculatedBalance: result.CalculatedBalance,

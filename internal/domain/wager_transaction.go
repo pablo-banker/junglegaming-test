@@ -20,6 +20,9 @@ const (
 
 type WagerTransactionStatus string
 
+// maxIdentifierLength bounds provider supplied identifiers, far below the PostgreSQL index limit.
+const maxIdentifierLength = 255
+
 const (
 	WagerTransactionStatusPending          WagerTransactionStatus = "PENDING"
 	WagerTransactionStatusPendingReference WagerTransactionStatus = "PENDING_REFERENCE"
@@ -521,15 +524,15 @@ func validateExternalWager(params NewExternalWagerTransactionParams) error {
 		return ErrInvalidTransactionID
 	}
 
-	if strings.TrimSpace(params.ProviderID) == "" {
+	if !isValidIdentifier(params.ProviderID) {
 		return ErrInvalidProviderID
 	}
 
-	if strings.TrimSpace(params.ExternalTransactionID) == "" {
+	if !isValidIdentifier(params.ExternalTransactionID) {
 		return ErrInvalidExternalTransactionID
 	}
 
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
+	if !isValidIdentifier(params.IdempotencyKey) {
 		return ErrInvalidIdempotencyKey
 	}
 
@@ -545,11 +548,11 @@ func validateExternalWager(params NewExternalWagerTransactionParams) error {
 		return ErrInvalidPlayerID
 	}
 
-	if strings.TrimSpace(params.RoundID) == "" {
+	if !isValidIdentifier(params.RoundID) {
 		return ErrInvalidRoundID
 	}
 
-	if strings.TrimSpace(params.GameID) == "" {
+	if !isValidIdentifier(params.GameID) {
 		return ErrInvalidGameID
 	}
 
@@ -570,6 +573,11 @@ func validateExternalWager(params NewExternalWagerTransactionParams) error {
 		params.ReferenceExternalTransactionID,
 	); err != nil {
 		return err
+	}
+
+	if len(params.ReferenceExternalTransactionID) > maxIdentifierLength ||
+		params.ReferenceExternalTransactionID == params.ExternalTransactionID {
+		return ErrInvalidWagerReference
 	}
 
 	if params.CreatedAt.IsZero() {
@@ -1072,4 +1080,9 @@ func (w *WagerTransaction) CompletedAt() (time.Time, bool) {
 	}
 
 	return *w.completedAt, true
+}
+
+// isValidIdentifier reports whether a provider supplied identifier is present and bounded.
+func isValidIdentifier(value string) bool {
+	return strings.TrimSpace(value) != "" && len(value) <= maxIdentifierLength
 }
