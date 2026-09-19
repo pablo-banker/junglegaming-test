@@ -48,5 +48,29 @@ services:
       retries: 5
       start_period: 5s
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    container_name: jungle-keycloak
+
+    command:
+      - start-dev
+      - --import-realm
+
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT}
+
+      KEYCLOAK_PROVIDER_A_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_A_CLIENT_SECRET}
+      KEYCLOAK_PROVIDER_B_CLIENT_SECRET: ${KEYCLOAK_PROVIDER_B_CLIENT_SECRET}
+      KEYCLOAK_INTERNAL_CLIENT_SECRET: ${KEYCLOAK_INTERNAL_CLIENT_SECRET}
+
+    ports:
+      - "${KEYCLOAK_PORT}:8080"
+
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+
 volumes:
   postgres_data:

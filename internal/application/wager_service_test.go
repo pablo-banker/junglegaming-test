@@ -1,3 +1,5 @@
+//go:build unit
+
 package application
 
 import (
@@ -718,5 +720,200 @@ func TestWagerServiceRejectsIdempotencyConflict(t *testing.T) {
 
 	if result != nil {
 		t.Fatal("expected no result after idempotency conflict")
+	}
+}
+
+// mustApplicationProcessedWager creates a processed wager transaction for application tests.
+func mustApplicationProcessedWager(t *testing.T, wallet *domain.Wallet, providerID string, externalTransactionID string) *domain.WagerTransaction {
+	t.Helper()
+
+	before := mustApplicationMoney(t, "100.00")
+	after := mustApplicationMoney(t, "75.00")
+	completedAt := wagerServiceTestTime.Add(-time.Minute)
+
+	transaction, err := domain.RehydrateWagerTransaction(domain.RehydrateWagerTransactionParams{
+		ID:                    uuid.New(),
+		ProviderID:            providerID,
+		ExternalTransactionID: externalTransactionID,
+		IdempotencyKey:        "key-" + uuid.NewString(),
+		PayloadHash:           "payload-hash",
+		WalletID:              wallet.ID(),
+		PlayerID:              wallet.PlayerID(),
+		RoundID:               "round-123",
+		GameID:                "game-123",
+		Type:                  domain.WagerTransactionTypeBet,
+		Amount:                mustApplicationMoney(t, "25.00"),
+		Status:                domain.WagerTransactionStatusProcessed,
+		BalanceBefore:         &before,
+		BalanceAfter:          &after,
+		CreatedAt:             wagerServiceTestTime.Add(-2 * time.Minute),
+		UpdatedAt:             completedAt,
+		CompletedAt:           &completedAt,
+	})
+	if err != nil {
+		t.Fatalf("unexpected wager creation error: %v", err)
+	}
+
+	return transaction
+}
+
+// TestWagerServiceGetByIDReturnsTransaction verifies transaction retrieval by internal id.
+func TestWagerServiceGetByIDReturnsTransaction(t *testing.T) {
+	service, _, _, wagers, _, _ := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	transaction := mustApplicationProcessedWager(t, wallet, "provider-a", "transaction-123")
+
+	wagers.findByIDResult = transaction
+
+	result, err := service.GetByID(context.Background(), "provider-a", transaction.ID().String())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TransactionID != transaction.ID() {
+		t.Errorf("expected transaction id %s, got %s", transaction.ID(), result.TransactionID)
+	}
+
+	if result.ProviderID != "provider-a" {
+		t.Errorf("expected provider-a, got %s", result.ProviderID)
+	}
+
+	if result.ExternalTransactionID != "transaction-123" {
+		t.Errorf("expected transaction-123, got %s", result.ExternalTransactionID)
+	}
+
+	if result.WalletID != wallet.ID() {
+		t.Errorf("expected wallet id %s, got %s", wallet.ID(), result.WalletID)
+	}
+
+	if result.PlayerID != wallet.PlayerID() {
+		t.Errorf("expected player id %s, got %s", wallet.PlayerID(), result.PlayerID)
+	}
+
+	if result.Type != domain.WagerTransactionTypeBet {
+		t.Errorf("expected BET, got %s", result.Type)
+	}
+
+	if result.Status != domain.WagerTransactionStatusProcessed {
+		t.Errorf("expected PROCESSED, got %s", result.Status)
+	}
+
+	if result.Amount.Amount() != "25.00" {
+		t.Errorf("expected amount 25.00, got %s", result.Amount.Amount())
+	}
+
+	if result.BalanceBefore == nil || result.BalanceBefore.Amount() != "100.00" {
+		t.Fatal("expected balance before 100.00")
+	}
+
+	if result.BalanceAfter == nil || result.BalanceAfter.Amount() != "75.00" {
+		t.Fatal("expected balance after 75.00")
+	}
+}
+
+// TestWagerServiceGetByIDRejectsInvalidTransactionID verifies invalid transaction identifiers.
+func TestWagerServiceGetByIDRejectsInvalidTransactionID(t *testing.T) {
+	service, _, _, _, _, _ := newWagerServiceForTest()
+
+	result, err := service.GetByID(context.Background(), "provider-a", "invalid-transaction-id")
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWagerServiceGetByIDPropagatesRepositoryError verifies repository failures.
+func TestWagerServiceGetByIDPropagatesRepositoryError(t *testing.T) {
+	service, _, _, wagers, _, _ := newWagerServiceForTest()
+
+	expectedErr := errors.New("wager repository unavailable")
+	wagers.findByIDErr = expectedErr
+
+	result, err := service.GetByID(context.Background(), "provider-a", uuid.NewString())
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWagerServiceGetByIDHidesAnotherProviderTransaction verifies provider isolation.
+func TestWagerServiceGetByIDHidesAnotherProviderTransaction(t *testing.T) {
+	service, _, _, wagers, _, _ := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	transaction := mustApplicationProcessedWager(t, wallet, "provider-b", "transaction-123")
+
+	wagers.findByIDResult = transaction
+
+	result, err := service.GetByID(context.Background(), "provider-a", transaction.ID().String())
+
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWagerServiceGetByExternalTransactionIDReturnsTransaction verifies provider-scoped external lookup.
+func TestWagerServiceGetByExternalTransactionIDReturnsTransaction(t *testing.T) {
+	service, _, _, wagers, _, _ := newWagerServiceForTest()
+
+	wallet := mustApplicationWallet(t, "75.00")
+	transaction := mustApplicationProcessedWager(t, wallet, "provider-a", "transaction-123")
+
+	wagers.findByProviderExternalResult = transaction
+
+	result, err := service.GetByExternalTransactionID(context.Background(), "provider-a", "transaction-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TransactionID != transaction.ID() {
+		t.Errorf("expected transaction id %s, got %s", transaction.ID(), result.TransactionID)
+	}
+
+	if result.ProviderID != "provider-a" {
+		t.Errorf("expected provider-a, got %s", result.ProviderID)
+	}
+
+	if result.ExternalTransactionID != "transaction-123" {
+		t.Errorf("expected transaction-123, got %s", result.ExternalTransactionID)
+	}
+
+	if result.Status != domain.WagerTransactionStatusProcessed {
+		t.Errorf("expected PROCESSED, got %s", result.Status)
+	}
+
+	if result.BalanceAfter == nil || result.BalanceAfter.Amount() != "75.00" {
+		t.Fatal("expected balance after 75.00")
+	}
+}
+
+// TestWagerServiceGetByExternalTransactionIDPropagatesRepositoryError verifies external lookup failures.
+func TestWagerServiceGetByExternalTransactionIDPropagatesRepositoryError(t *testing.T) {
+	service, _, _, wagers, _, _ := newWagerServiceForTest()
+
+	expectedErr := errors.New("wager not found")
+	wagers.findByProviderExternalErr = expectedErr
+
+	result, err := service.GetByExternalTransactionID(context.Background(), "provider-a", "transaction-123")
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
 	}
 }

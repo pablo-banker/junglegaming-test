@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
@@ -110,7 +111,7 @@ func (r *WagerRepository) Create(ctx context.Context, transaction *domain.WagerT
 		ON CONFLICT DO NOTHING
 	`
 
-	result, err := r.db(ctx).Exec(
+	result, err := db(ctx, r.pool).Exec(
 		ctx,
 		query,
 		transaction.ID(),
@@ -138,7 +139,7 @@ func (r *WagerRepository) Create(ctx context.Context, transaction *domain.WagerT
 		wagerCompletedAt(transaction),
 	)
 	if err != nil {
-		return err
+		return mapWagerCreateError(err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -149,10 +150,7 @@ func (r *WagerRepository) Create(ctx context.Context, transaction *domain.WagerT
 }
 
 // Update persists the mutable state of a wager transaction.
-func (r *WagerRepository) Update(
-	ctx context.Context,
-	transaction *domain.WagerTransaction,
-) error {
+func (r *WagerRepository) Update(ctx context.Context, transaction *domain.WagerTransaction) error {
 	const query = `
 		UPDATE wager_transactions
 		SET
@@ -170,7 +168,7 @@ func (r *WagerRepository) Update(
 		WHERE id = $1
 	`
 
-	result, err := r.db(ctx).Exec(
+	result, err := db(ctx, r.pool).Exec(
 		ctx,
 		query,
 		transaction.ID(),
@@ -196,12 +194,7 @@ func (r *WagerRepository) Update(
 }
 
 // UpdatePendingReference persists reference retry scheduling information.
-func (r *WagerRepository) UpdatePendingReference(
-	ctx context.Context,
-	transaction *domain.WagerTransaction,
-	nextAttemptAt time.Time,
-	expiresAt time.Time,
-) error {
+func (r *WagerRepository) UpdatePendingReference(ctx context.Context, transaction *domain.WagerTransaction, nextAttemptAt time.Time, expiresAt time.Time) error {
 	const query = `
 		UPDATE wager_transactions
 		SET
@@ -212,7 +205,7 @@ func (r *WagerRepository) UpdatePendingReference(
 		WHERE id = $1
 	`
 
-	result, err := r.db(ctx).Exec(
+	result, err := db(ctx, r.pool).Exec(
 		ctx,
 		query,
 		transaction.ID(),
@@ -233,16 +226,13 @@ func (r *WagerRepository) UpdatePendingReference(
 }
 
 // FindByID returns a wager transaction by its internal identifier.
-func (r *WagerRepository) FindByID(
-	ctx context.Context,
-	id uuid.UUID,
-) (*domain.WagerTransaction, error) {
+func (r *WagerRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.WagerTransaction, error) {
 	query := wagerSelect + `
 		WHERE id = $1
 	`
 
 	return scanWager(
-		r.db(ctx).QueryRow(ctx, query, id),
+		db(ctx, r.pool).QueryRow(ctx, query, id),
 	)
 }
 
@@ -254,7 +244,7 @@ func (r *WagerRepository) FindByProviderAndExternalTransactionID(ctx context.Con
 	`
 
 	return scanWager(
-		r.db(ctx).QueryRow(
+		db(ctx, r.pool).QueryRow(
 			ctx,
 			query,
 			providerID,
@@ -271,7 +261,7 @@ func (r *WagerRepository) FindByProviderAndIdempotencyKey(ctx context.Context, p
 	`
 
 	return scanWager(
-		r.db(ctx).QueryRow(
+		db(ctx, r.pool).QueryRow(
 			ctx,
 			query,
 			providerID,
@@ -294,7 +284,7 @@ func (r *WagerRepository) HasProcessedDirectReversal(ctx context.Context, refere
 
 	var exists bool
 
-	err := r.db(ctx).QueryRow(ctx, query, referenceTransactionID).
+	err := db(ctx, r.pool).QueryRow(ctx, query, referenceTransactionID).
 		Scan(&exists)
 	if err != nil {
 		return false, err
@@ -303,13 +293,19 @@ func (r *WagerRepository) HasProcessedDirectReversal(ctx context.Context, refere
 	return exists, nil
 }
 
-// db returns the current transaction or falls back to the connection pool.
-func (r *WagerRepository) db(ctx context.Context) dbExecutor {
-	if tx, ok := txFromContext(ctx); ok {
-		return tx
+// mapWagerCreateError translates known database constraints into application errors.
+func mapWagerCreateError(err error) error {
+	var pgErr *pgconn.PgError
+
+	if !errors.As(err, &pgErr) {
+		return err
 	}
 
-	return r.pool
+	if pgErr.Code == "23503" && pgErr.ConstraintName == "fk_wager_transactions_wallet_currency" {
+		return application.ErrInvalidWalletReference
+	}
+
+	return err
 }
 
 // scanWager rebuilds a wager transaction from a PostgreSQL row.

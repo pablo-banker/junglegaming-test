@@ -1,3 +1,5 @@
+//go:build unit
+
 package application
 
 import (
@@ -255,8 +257,14 @@ func (f *fakeWagerRepository) HasProcessedDirectReversal(
 }
 
 type fakeLedgerRepository struct {
-	created []*domain.WalletLedgerEntry
-	err     error
+	created           []*domain.WalletLedgerEntry
+	listed            []*domain.WalletLedgerEntry
+	calculatedBalance domain.Money
+	calculatedCount   int64
+
+	err          error
+	listErr      error
+	calculateErr error
 }
 
 // Create records a wallet ledger entry.
@@ -271,6 +279,38 @@ func (f *fakeLedgerRepository) Create(
 	f.created = append(f.created, entry)
 
 	return nil
+}
+
+// ListByWallet returns configured wallet ledger entries.
+func (f *fakeLedgerRepository) ListByWallet(
+	_ context.Context,
+	_ uuid.UUID,
+	_ *time.Time,
+	_ *uuid.UUID,
+	_ int,
+) ([]*domain.WalletLedgerEntry, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+
+	if f.listed != nil {
+		return f.listed, nil
+	}
+
+	return f.created, nil
+}
+
+// CalculateBalance returns the configured reconstructed wallet balance.
+func (f *fakeLedgerRepository) CalculateBalance(
+	_ context.Context,
+	_ uuid.UUID,
+	_ domain.Currency,
+) (domain.Money, int64, error) {
+	if f.calculateErr != nil {
+		return domain.Money{}, 0, f.calculateErr
+	}
+
+	return f.calculatedBalance, f.calculatedCount, nil
 }
 
 type fakeOutboxRepository struct {

@@ -42,6 +42,8 @@ type WagerRepository interface {
 // WalletLedgerRepository defines persistence operations required for ledger entries.
 type WalletLedgerRepository interface {
 	Create(ctx context.Context, entry *domain.WalletLedgerEntry) error
+	ListByWallet(ctx context.Context, walletID uuid.UUID, beforeCreatedAt *time.Time, beforeID *uuid.UUID, limit int) ([]*domain.WalletLedgerEntry, error)
+	CalculateBalance(ctx context.Context, walletID uuid.UUID, currency domain.Currency) (domain.Money, int64, error)
 }
 
 // OutboxRepository defines persistence operations required for application events.

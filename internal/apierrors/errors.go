@@ -1,23 +1,16 @@
 package apierrors
 
 const (
-	ErrInfraBase = 100
-)
-
-const (
-	ErrDatabaseURLCode = ErrInfraBase + iota
-	ErrConnectDBCode
-	ErrPingDBCode
+	ErrPingDBCode = 100
 	ErrInternalCode
 )
 
 const (
-	ErrHTTPBase = 200
-)
-
-const (
-	ErrInvalidPayloadCode = ErrHTTPBase + iota
+	ErrInvalidPayloadCode = 200
 	ErrValidationCode
+	ErrUnauthorizedCode
+	ErrForbiddenCode
 	ErrNotFoundCode
 	ErrMethodNotAllowedCode
+	ErrConflictCode
 )

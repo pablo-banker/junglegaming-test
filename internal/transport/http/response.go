@@ -6,6 +6,8 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/pablo-banker/junglegaming-test/internal/apierrors"
+	"github.com/pablo-banker/junglegaming-test/internal/application"
+	"github.com/pablo-banker/junglegaming-test/internal/domain"
 )
 
 type Response[T any] struct {
@@ -64,16 +66,52 @@ func ResolveError(err error) *apierrors.APIError {
 		return apiErr
 	}
 
+	if errors.Is(err, application.ErrAlreadyExists) ||
+		errors.Is(err, application.ErrIdempotencyConflict) ||
+		errors.Is(err, application.ErrExternalTransactionConflict) {
+		return apierrors.ErrConflict
+	}
+
+	if errors.Is(err, application.ErrNotFound) ||
+		errors.Is(err, application.ErrWalletNotFound) {
+		return apierrors.ErrNotFound
+	}
+
+	if errors.Is(err, application.ErrWalletMismatch) ||
+		errors.Is(err, application.ErrInvalidWalletReference) {
+		return apierrors.ErrValidation
+	}
+
+	if errors.Is(err, domain.ErrInvalidCurrency) ||
+		errors.Is(err, domain.ErrInvalidMoney) ||
+		errors.Is(err, domain.ErrCurrencyMismatch) ||
+		errors.Is(err, domain.ErrAmountMustBePositive) ||
+		errors.Is(err, domain.ErrInvalidWalletID) ||
+		errors.Is(err, domain.ErrInvalidPlayerID) ||
+		errors.Is(err, domain.ErrInvalidProviderID) ||
+		errors.Is(err, domain.ErrInvalidExternalTransactionID) ||
+		errors.Is(err, domain.ErrInvalidIdempotencyKey) ||
+		errors.Is(err, domain.ErrInvalidRoundID) ||
+		errors.Is(err, domain.ErrInvalidGameID) ||
+		errors.Is(err, domain.ErrInvalidWagerType) ||
+		errors.Is(err, domain.ErrInvalidWagerAmount) ||
+		errors.Is(err, domain.ErrInvalidWagerReference) ||
+		errors.Is(err, domain.ErrWagerReferenceMismatch) {
+		return apierrors.ErrValidation
+	}
+
 	if fiberErr, ok := errors.AsType[*fiber.Error](err); ok {
 		switch fiberErr.Code {
-		case fiber.StatusNotFound:
-			return apierrors.ErrNotFound
-
-		case fiber.StatusMethodNotAllowed:
-			return apierrors.ErrMethodNotAllowed
-
 		case fiber.StatusBadRequest:
 			return apierrors.ErrInvalidPayload
+		case fiber.StatusUnauthorized:
+			return apierrors.ErrUnauthorized
+		case fiber.StatusForbidden:
+			return apierrors.ErrForbidden
+		case fiber.StatusNotFound:
+			return apierrors.ErrNotFound
+		case fiber.StatusMethodNotAllowed:
+			return apierrors.ErrMethodNotAllowed
 		}
 	}
 

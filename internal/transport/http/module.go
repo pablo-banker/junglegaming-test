@@ -6,6 +6,9 @@ var Module = fx.Module(
 	"http",
 	fx.Provide(
 		NewHealthHandler,
+		NewAuthMiddleware,
+		NewWalletHandler,
+		NewWagerHandler,
 		NewRouter,
 	),
 

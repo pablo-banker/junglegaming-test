@@ -10,4 +10,5 @@ var (
 	ErrExternalTransactionConflict = errors.New("external transaction conflict")
 	ErrWalletNotFound              = errors.New("wallet not found")
 	ErrWalletMismatch              = errors.New("wallet does not match wager")
+	ErrInvalidWalletReference      = errors.New("invalid wallet reference")
 )

@@ -1,3 +1,5 @@
+//go:build unit
+
 package application
 
 import (
@@ -50,6 +52,69 @@ func newWalletServiceForTest() (
 	)
 
 	return service, txManager, wallets, wagers, ledger, outbox
+}
+
+// newWalletForTest creates a wallet with the given balance.
+func newWalletForTest(t *testing.T, amount string) *domain.Wallet {
+	t.Helper()
+
+	currency, err := domain.NewCurrency("BRL")
+	if err != nil {
+		t.Fatalf("unexpected currency error: %v", err)
+	}
+
+	balance, err := domain.ParseMoney(amount, currency)
+	if err != nil {
+		t.Fatalf("unexpected money error: %v", err)
+	}
+
+	wallet, err := domain.NewWallet(
+		uuid.New(),
+		uuid.New(),
+		balance,
+		walletServiceTestTime,
+	)
+	if err != nil {
+		t.Fatalf("unexpected wallet error: %v", err)
+	}
+
+	return wallet
+}
+
+// newLedgerEntryForTest creates a ledger entry for tests.
+func newLedgerEntryForTest(t *testing.T, wallet *domain.Wallet, amount string) *domain.WalletLedgerEntry {
+	t.Helper()
+
+	currency := wallet.Balance().Currency()
+
+	entryAmount, err := domain.ParseMoney(
+		amount,
+		currency,
+	)
+	if err != nil {
+		t.Fatalf("unexpected amount error: %v", err)
+	}
+
+	zero, err := domain.Zero(currency)
+	if err != nil {
+		t.Fatalf("unexpected zero money error: %v", err)
+	}
+
+	entry, err := domain.NewWalletLedgerEntry(
+		uuid.New(),
+		wallet.ID(),
+		uuid.New(),
+		domain.WalletLedgerDirectionCredit,
+		entryAmount,
+		zero,
+		entryAmount,
+		walletServiceTestTime,
+	)
+	if err != nil {
+		t.Fatalf("unexpected ledger entry error: %v", err)
+	}
+
+	return entry
 }
 
 // TestWalletServiceCreateZeroBalanceCreatesOnlyWallet verifies zero-balance creation.
@@ -237,5 +302,399 @@ func TestWalletServiceCreatePropagatesTransactionError(t *testing.T) {
 
 	if result != nil {
 		t.Fatal("expected no result after transaction failure")
+	}
+}
+
+// TestWalletServiceGetReturnsWallet verifies wallet retrieval.
+func TestWalletServiceGetReturnsWallet(t *testing.T) {
+	service, _, wallets, _, _, _ := newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	wallets.findByIDResult = wallet
+
+	result, err := service.Get(
+		context.Background(),
+		wallet.ID().String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.WalletID != wallet.ID() {
+		t.Errorf(
+			"expected wallet id %s, got %s",
+			wallet.ID(),
+			result.WalletID,
+		)
+	}
+
+	if result.PlayerID != wallet.PlayerID() {
+		t.Errorf(
+			"expected player id %s, got %s",
+			wallet.PlayerID(),
+			result.PlayerID,
+		)
+	}
+
+	if result.Balance.Amount() != "100.00" {
+		t.Errorf(
+			"expected balance 100.00, got %s",
+			result.Balance.Amount(),
+		)
+	}
+
+	if result.Version != 1 {
+		t.Errorf("expected version 1, got %d", result.Version)
+	}
+}
+
+// TestWalletServiceGetRejectsInvalidWalletID verifies invalid wallet identifiers.
+func TestWalletServiceGetRejectsInvalidWalletID(t *testing.T) {
+	service, _, _, _, _, _ := newWalletServiceForTest()
+
+	result, err := service.Get(
+		context.Background(),
+		"invalid-wallet-id",
+	)
+
+	if !errors.Is(err, ErrWalletNotFound) {
+		t.Fatalf("expected ErrWalletNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceGetPropagatesRepositoryError verifies repository failures.
+func TestWalletServiceGetPropagatesRepositoryError(t *testing.T) {
+	service, _, wallets, _, _, _ := newWalletServiceForTest()
+
+	expectedErr := errors.New("wallet repository unavailable")
+	wallets.findByIDErr = expectedErr
+
+	result, err := service.Get(
+		context.Background(),
+		uuid.NewString(),
+	)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceListLedgerReturnsEntries verifies ledger retrieval.
+func TestWalletServiceListLedgerReturnsEntries(t *testing.T) {
+	service, _, wallets, _, ledger, _ := newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	entry := newLedgerEntryForTest(t, wallet, "100.00")
+
+	wallets.findByIDResult = wallet
+	ledger.listed = []*domain.WalletLedgerEntry{
+		entry,
+	}
+
+	result, err := service.ListLedger(
+		context.Background(),
+		wallet.ID().String(),
+		nil,
+		nil,
+		50,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Entries) != 1 {
+		t.Fatalf(
+			"expected 1 ledger entry, got %d",
+			len(result.Entries),
+		)
+	}
+
+	if result.Entries[0].ID() != entry.ID() {
+		t.Errorf(
+			"expected entry %s, got %s",
+			entry.ID(),
+			result.Entries[0].ID(),
+		)
+	}
+}
+
+// TestWalletServiceListLedgerReturnsEmptyEntries verifies wallets without ledger entries.
+func TestWalletServiceListLedgerReturnsEmptyEntries(t *testing.T) {
+	service, _, wallets, _, ledger, _ := newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "0.00")
+
+	wallets.findByIDResult = wallet
+	ledger.listed = []*domain.WalletLedgerEntry{}
+
+	result, err := service.ListLedger(
+		context.Background(),
+		wallet.ID().String(),
+		nil,
+		nil,
+		50,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(result.Entries) != 0 {
+		t.Fatalf(
+			"expected no ledger entries, got %d",
+			len(result.Entries),
+		)
+	}
+}
+
+// TestWalletServiceListLedgerRejectsInvalidWalletID verifies invalid wallet identifiers.
+func TestWalletServiceListLedgerRejectsInvalidWalletID(t *testing.T) {
+	service, _, _, _, _, _ := newWalletServiceForTest()
+
+	result, err := service.ListLedger(
+		context.Background(),
+		"invalid-wallet-id",
+		nil,
+		nil,
+		50,
+	)
+
+	if !errors.Is(err, ErrWalletNotFound) {
+		t.Fatalf("expected ErrWalletNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceListLedgerPropagatesWalletError verifies wallet lookup failures.
+func TestWalletServiceListLedgerPropagatesWalletError(t *testing.T) {
+	service, _, wallets, _, _, _ := newWalletServiceForTest()
+
+	expectedErr := errors.New("wallet lookup failed")
+	wallets.findByIDErr = expectedErr
+
+	result, err := service.ListLedger(
+		context.Background(),
+		uuid.NewString(),
+		nil,
+		nil,
+		50,
+	)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceListLedgerPropagatesLedgerError verifies ledger failures.
+func TestWalletServiceListLedgerPropagatesLedgerError(t *testing.T) {
+	service, _, wallets, _, ledger, _ := newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	wallets.findByIDResult = wallet
+
+	expectedErr := errors.New("ledger unavailable")
+	ledger.listErr = expectedErr
+
+	result, err := service.ListLedger(
+		context.Background(),
+		wallet.ID().String(),
+		nil,
+		nil,
+		50,
+	)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceReconcileReturnsConsistent verifies matching wallet and ledger balances.
+func TestWalletServiceReconcileReturnsConsistent(t *testing.T) {
+	service, txManager, wallets, _, ledger, _ :=
+		newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	wallets.findByIDForUpdateResult = wallet
+
+	ledger.calculatedBalance = wallet.Balance()
+	ledger.calculatedCount = 3
+
+	result, err := service.Reconcile(
+		context.Background(),
+		wallet.ID().String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !txManager.called {
+		t.Fatal("expected transaction to be started")
+	}
+
+	if !result.Consistent {
+		t.Fatal("expected reconciliation to be consistent")
+	}
+
+	if result.StoredBalance.Amount() != "100.00" {
+		t.Errorf(
+			"expected stored balance 100.00, got %s",
+			result.StoredBalance.Amount(),
+		)
+	}
+
+	if result.CalculatedBalance.Amount() != "100.00" {
+		t.Errorf(
+			"expected calculated balance 100.00, got %s",
+			result.CalculatedBalance.Amount(),
+		)
+	}
+
+	if result.CheckedEntries != 3 {
+		t.Errorf(
+			"expected 3 checked entries, got %d",
+			result.CheckedEntries,
+		)
+	}
+}
+
+// TestWalletServiceReconcileReturnsInconsistent verifies balance mismatches.
+func TestWalletServiceReconcileReturnsInconsistent(t *testing.T) {
+	service, _, wallets, _, ledger, _ :=
+		newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	wallets.findByIDForUpdateResult = wallet
+
+	currency := wallet.Balance().Currency()
+
+	calculatedBalance, err := domain.ParseMoney(
+		"90.00",
+		currency,
+	)
+	if err != nil {
+		t.Fatalf("unexpected money error: %v", err)
+	}
+
+	ledger.calculatedBalance = calculatedBalance
+	ledger.calculatedCount = 2
+
+	result, err := service.Reconcile(
+		context.Background(),
+		wallet.ID().String(),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.Consistent {
+		t.Fatal("expected reconciliation to be inconsistent")
+	}
+
+	if result.StoredBalance.Amount() != "100.00" {
+		t.Errorf(
+			"expected stored balance 100.00, got %s",
+			result.StoredBalance.Amount(),
+		)
+	}
+
+	if result.CalculatedBalance.Amount() != "90.00" {
+		t.Errorf(
+			"expected calculated balance 90.00, got %s",
+			result.CalculatedBalance.Amount(),
+		)
+	}
+}
+
+// TestWalletServiceReconcileRejectsInvalidWalletID verifies invalid wallet identifiers.
+func TestWalletServiceReconcileRejectsInvalidWalletID(t *testing.T) {
+	service, txManager, _, _, _, _ :=
+		newWalletServiceForTest()
+
+	result, err := service.Reconcile(
+		context.Background(),
+		"invalid-wallet-id",
+	)
+
+	if !errors.Is(err, ErrWalletNotFound) {
+		t.Fatalf("expected ErrWalletNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+
+	if txManager.called {
+		t.Fatal("expected transaction not to start")
+	}
+}
+
+// TestWalletServiceReconcilePropagatesWalletError verifies locked wallet lookup failures.
+func TestWalletServiceReconcilePropagatesWalletError(t *testing.T) {
+	service, txManager, wallets, _, _, _ := newWalletServiceForTest()
+
+	expectedErr := errors.New("wallet lock failed")
+	wallets.findByIDForUpdateErr = expectedErr
+
+	result, err := service.Reconcile(
+		context.Background(),
+		uuid.NewString(),
+	)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+
+	if !txManager.called {
+		t.Fatal("expected transaction to be started")
+	}
+}
+
+// TestWalletServiceReconcilePropagatesLedgerError verifies ledger reconstruction failures.
+func TestWalletServiceReconcilePropagatesLedgerError(t *testing.T) {
+	service, txManager, wallets, _, ledger, _ := newWalletServiceForTest()
+
+	wallet := newWalletForTest(t, "100.00")
+	wallets.findByIDForUpdateResult = wallet
+
+	expectedErr := errors.New("ledger calculation failed")
+	ledger.calculateErr = expectedErr
+
+	result, err := service.Reconcile(
+		context.Background(),
+		wallet.ID().String(),
+	)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+
+	if !txManager.called {
+		t.Fatal("expected transaction to be started")
 	}
 }

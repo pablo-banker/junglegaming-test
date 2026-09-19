@@ -17,6 +17,26 @@ type CreateWalletResult struct {
 	Version  int64        `json:"version"`
 }
 
+type WalletResult struct {
+	WalletID uuid.UUID    `json:"walletId"`
+	PlayerID uuid.UUID    `json:"playerId"`
+	Balance  domain.Money `json:"balance"`
+	Version  int64        `json:"version"`
+}
+
+type WalletLedgerResult struct {
+	Entries []*domain.WalletLedgerEntry
+}
+
+type WalletReconciliationResult struct {
+	WalletID          uuid.UUID
+	StoredBalance     domain.Money
+	CalculatedBalance domain.Money
+	Difference        domain.Money
+	Consistent        bool
+	CheckedEntries    int64
+}
+
 type WalletService struct {
 	txManager TransactionManager
 	clock     Clock
@@ -110,6 +130,105 @@ func (s *WalletService) Create(ctx context.Context, command CreateWalletCommand,
 				PlayerID: wallet.PlayerID(),
 				Balance:  wallet.Balance(),
 				Version:  wallet.Version(),
+			}
+
+			return nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// Get returns a wallet by its identifier.
+func (s *WalletService) Get(ctx context.Context, walletID string) (*WalletResult, error) {
+	id, err := uuid.Parse(walletID)
+	if err != nil || id == uuid.Nil {
+		return nil, ErrWalletNotFound
+	}
+
+	wallet, err := s.wallets.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &WalletResult{
+		WalletID: wallet.ID(),
+		PlayerID: wallet.PlayerID(),
+		Balance:  wallet.Balance(),
+		Version:  wallet.Version(),
+	}, nil
+}
+
+// ListLedger returns paginated ledger entries for a wallet.
+func (s *WalletService) ListLedger(
+	ctx context.Context,
+	walletID string,
+	beforeCreatedAt *time.Time,
+	beforeID *uuid.UUID,
+	limit int,
+) (*WalletLedgerResult, error) {
+	id, err := uuid.Parse(walletID)
+	if err != nil || id == uuid.Nil {
+		return nil, ErrWalletNotFound
+	}
+
+	if _, err := s.wallets.FindByID(ctx, id); err != nil {
+		return nil, err
+	}
+
+	entries, err := s.ledger.ListByWallet(
+		ctx,
+		id,
+		beforeCreatedAt,
+		beforeID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &WalletLedgerResult{
+		Entries: entries,
+	}, nil
+}
+
+// Reconcile compares the stored wallet balance with the reconstructed ledger balance.
+func (s *WalletService) Reconcile(ctx context.Context, walletID string) (*WalletReconciliationResult, error) {
+	id, err := uuid.Parse(walletID)
+	if err != nil || id == uuid.Nil {
+		return nil, ErrWalletNotFound
+	}
+
+	var result *WalletReconciliationResult
+
+	err = s.txManager.WithinTransaction(
+		ctx,
+		func(txCtx context.Context) error {
+			wallet, err := s.wallets.FindByIDForUpdate(txCtx, id)
+			if err != nil {
+				return err
+			}
+
+			calculatedBalance, checkedEntries, err := s.ledger.CalculateBalance(txCtx, wallet.ID(), wallet.Balance().Currency())
+			if err != nil {
+				return err
+			}
+
+			difference, err := wallet.Balance().Sub(calculatedBalance)
+			if err != nil {
+				return err
+			}
+
+			result = &WalletReconciliationResult{
+				WalletID:          wallet.ID(),
+				StoredBalance:     wallet.Balance(),
+				CalculatedBalance: calculatedBalance,
+				Difference:        difference,
+				Consistent:        wallet.Balance().Equal(calculatedBalance),
+				CheckedEntries:    checkedEntries,
 			}
 
 			return nil

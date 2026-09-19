@@ -35,6 +35,26 @@ type ProcessWagerResult struct {
 	IdempotentReplay      bool                          `json:"idempotentReplay"`
 }
 
+type WagerResult struct {
+	TransactionID                  uuid.UUID                     `json:"transactionId"`
+	ProviderID                     string                        `json:"providerId"`
+	ExternalTransactionID          string                        `json:"externalTransactionId"`
+	WalletID                       uuid.UUID                     `json:"walletId"`
+	PlayerID                       uuid.UUID                     `json:"playerId"`
+	RoundID                        string                        `json:"roundId"`
+	GameID                         string                        `json:"gameId"`
+	Type                           domain.WagerTransactionType   `json:"type"`
+	Amount                         domain.Money                  `json:"money"`
+	ReferenceExternalTransactionID string                        `json:"referenceExternalTransactionId,omitempty"`
+	Status                         domain.WagerTransactionStatus `json:"status"`
+	FailureCode                    string                        `json:"failureCode,omitempty"`
+	FailureMessage                 string                        `json:"failureMessage,omitempty"`
+	BalanceBefore                  *domain.Money                 `json:"balanceBefore,omitempty"`
+	BalanceAfter                   *domain.Money                 `json:"balanceAfter,omitempty"`
+	CreatedAt                      time.Time                     `json:"createdAt"`
+	UpdatedAt                      time.Time                     `json:"updatedAt"`
+}
+
 type WagerService struct {
 	txManager TransactionManager
 	clock     Clock
@@ -204,6 +224,39 @@ func (s *WagerService) Process(ctx context.Context, command ProcessWagerCommand,
 	}
 
 	return result, nil
+}
+
+// GetByID returns a wager transaction visible to the authenticated provider.
+func (s *WagerService) GetByID(ctx context.Context, providerID string, transactionID string) (*WagerResult, error) {
+	id, err := uuid.Parse(transactionID)
+	if err != nil || id == uuid.Nil {
+		return nil, ErrNotFound
+	}
+
+	transaction, err := s.wagers.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if transaction.ProviderID() != providerID {
+		return nil, ErrNotFound
+	}
+
+	return wagerResultFromTransaction(transaction), nil
+}
+
+// GetByExternalTransactionID returns a wager transaction by provider and external identifier.
+func (s *WagerService) GetByExternalTransactionID(
+	ctx context.Context,
+	providerID string,
+	externalTransactionID string,
+) (*WagerResult, error) {
+	transaction, err := s.wagers.FindByProviderAndExternalTransactionID(ctx, providerID, externalTransactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return wagerResultFromTransaction(transaction), nil
 }
 
 // resolveExistingTransaction handles persisted idempotency and external transaction conflicts.
@@ -544,6 +597,37 @@ func resultFromWager(transaction *domain.WagerTransaction, idempotentReplay bool
 		FailureCode:           transaction.FailureCode(),
 		FailureMessage:        transaction.FailureMessage(),
 		IdempotentReplay:      idempotentReplay,
+	}
+
+	if before, ok := transaction.BalanceBefore(); ok {
+		result.BalanceBefore = &before
+	}
+
+	if after, ok := transaction.BalanceAfter(); ok {
+		result.BalanceAfter = &after
+	}
+
+	return result
+}
+
+// wagerResultFromTransaction builds a query result from persisted wager state.
+func wagerResultFromTransaction(transaction *domain.WagerTransaction) *WagerResult {
+	result := &WagerResult{
+		TransactionID:                  transaction.ID(),
+		ProviderID:                     transaction.ProviderID(),
+		ExternalTransactionID:          transaction.ExternalTransactionID(),
+		WalletID:                       transaction.WalletID(),
+		PlayerID:                       transaction.PlayerID(),
+		RoundID:                        transaction.RoundID(),
+		GameID:                         transaction.GameID(),
+		Type:                           transaction.Type(),
+		Amount:                         transaction.Amount(),
+		ReferenceExternalTransactionID: transaction.ReferenceExternalTransactionID(),
+		Status:                         transaction.Status(),
+		FailureCode:                    transaction.FailureCode(),
+		FailureMessage:                 transaction.FailureMessage(),
+		CreatedAt:                      transaction.CreatedAt(),
+		UpdatedAt:                      transaction.UpdatedAt(),
 	}
 
 	if before, ok := transaction.BalanceBefore(); ok {

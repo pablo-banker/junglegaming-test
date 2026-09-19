@@ -16,11 +16,6 @@ import (
 
 var ErrTransactionRequired = errors.New("transaction required")
 
-type dbExecutor interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 type WalletRepository struct {
 	pool *pgxpool.Pool
 }
@@ -49,7 +44,7 @@ func (r *WalletRepository) Create(ctx context.Context, wallet *domain.Wallet) er
 		VALUES ($1, $2, $3, $4::text::numeric, $5, $6, $7)
 	`
 
-	_, err := r.db(ctx).Exec(
+	_, err := db(ctx, r.pool).Exec(
 		ctx,
 		query,
 		wallet.ID(),
@@ -87,7 +82,7 @@ func (r *WalletRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.
 	`
 
 	return scanWallet(
-		r.db(ctx).QueryRow(ctx, query, id),
+		db(ctx, r.pool).QueryRow(ctx, query, id),
 	)
 }
 
@@ -134,7 +129,7 @@ func (r *WalletRepository) FindByPlayerAndCurrency(ctx context.Context, playerID
 	`
 
 	return scanWallet(
-		r.db(ctx).QueryRow(
+		db(ctx, r.pool).QueryRow(
 			ctx,
 			query,
 			playerID,
@@ -154,7 +149,7 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 		WHERE id = $1
 	`
 
-	result, err := r.db(ctx).Exec(
+	result, err := db(ctx, r.pool).Exec(
 		ctx,
 		query,
 		wallet.ID(),
@@ -171,15 +166,6 @@ func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) er
 	}
 
 	return nil
-}
-
-// db returns the current transaction or falls back to the connection pool.
-func (r *WalletRepository) db(ctx context.Context) dbExecutor {
-	if tx, ok := txFromContext(ctx); ok {
-		return tx
-	}
-
-	return r.pool
 }
 
 // scanWallet rebuilds a wallet from a PostgreSQL row.
