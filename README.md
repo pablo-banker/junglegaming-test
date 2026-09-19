@@ -217,6 +217,25 @@ docker compose unpause postgres   # tudo retoma sem intervenção
 docker compose kill -s SIGKILL app && docker compose up -d app   # queda abrupta; pendências retomadas
 ```
 
+## Interface de apoio (`web/`)
+
+Ferramenta de desenvolvimento em SvelteKit + Tailwind para exercitar e observar o serviço.
+Não faz parte do desafio e não altera a arquitetura: nenhuma rota nova foi criada na API.
+
+```sh
+make up                      # a stack precisa estar no ar
+cd web && npm install && npm run dev   # http://localhost:5173
+```
+
+Lê o `.env` da raiz, então usa os mesmos clients do Keycloak, filas e banco.
+
+| Área | O que faz | Como acessa |
+| --- | --- | --- |
+| Providers | Emula um provider: obtém token `client_credentials`, cria ou carrega carteiras, envia BET/WIN/LOSS/REFUND/ROLLBACK com `Idempotency-Key` e mostra a resposta com o efeito (saldo, versão, transação e lançamento do ledger) | Só pelo fluxo real: Keycloak → API Go. Nunca acessa o banco |
+| Admin | Cards (wallets, wagers, pending references, outbox pendente, SQS ready/in flight, DLQ), tabelas de transações, carteiras, ledger, outbox e inbox, e a transação aberta com suas relações | Lê o PostgreSQL em sessão somente leitura pelos arquivos `.server.ts` e as filas com `GetQueueAttributes` |
+
+Os secrets ficam no servidor: o browser recebe apenas as claims do token.
+
 ## Estrutura
 
 ```text
@@ -230,4 +249,5 @@ internal/observability     logger JSON e métricas
 internal/wiring            composição Fx
 migrations                 SQL versionado (up/down)
 tests/integration, tests/e2e
+web/                       interface de apoio (SvelteKit), fora do escopo do desafio
 ```
