@@ -8,11 +8,11 @@ import (
 func RequireProvider(c fiber.Ctx) error {
 	principal, ok := PrincipalFromContext(c)
 	if !ok {
-		return unauthorized(c)
+		return errUnauthorized
 	}
 
 	if !principal.IsProvider() {
-		return forbidden(c)
+		return errForbidden
 	}
 
 	return c.Next()
@@ -22,21 +22,12 @@ func RequireProvider(c fiber.Ctx) error {
 func RequireInternal(c fiber.Ctx) error {
 	principal, ok := PrincipalFromContext(c)
 	if !ok {
-		return unauthorized(c)
+		return errUnauthorized
 	}
 
 	if !principal.IsInternal() {
-		return forbidden(c)
+		return errForbidden
 	}
 
 	return c.Next()
-}
-
-// forbidden returns a standardized authorization error.
-func forbidden(c fiber.Ctx) error {
-	return c.Status(
-		fiber.StatusForbidden,
-	).JSON(fiber.Map{
-		"error": "forbidden",
-	})
 }

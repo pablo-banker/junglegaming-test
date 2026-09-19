@@ -161,8 +161,11 @@ func (r *WagerRepository) Update(ctx context.Context, transaction *domain.WagerT
 			failure_message = $6,
 			balance_before = $7::text::numeric,
 			balance_after = $8::text::numeric,
+			reference_retry_count = 0,
 			next_reference_attempt_at = NULL,
 			reference_expires_at = NULL,
+			reference_correlation_id = NULL,
+			reference_causation_id = NULL,
 			updated_at = $9,
 			completed_at = $10
 		WHERE id = $1
@@ -194,14 +197,23 @@ func (r *WagerRepository) Update(ctx context.Context, transaction *domain.WagerT
 }
 
 // UpdatePendingReference persists reference retry scheduling information.
-func (r *WagerRepository) UpdatePendingReference(ctx context.Context, transaction *domain.WagerTransaction, nextAttemptAt time.Time, expiresAt time.Time) error {
+func (r *WagerRepository) UpdatePendingReference(
+	ctx context.Context,
+	transaction *domain.WagerTransaction,
+	nextAttemptAt time.Time,
+	expiresAt time.Time,
+	metadata application.CommandMetadata,
+) error {
 	const query = `
 		UPDATE wager_transactions
 		SET
 			status = $2::wager_transaction_status,
 			updated_at = $3,
+			reference_retry_count = 0,
 			next_reference_attempt_at = $4,
-			reference_expires_at = $5
+			reference_expires_at = $5,
+			reference_correlation_id = $6,
+			reference_causation_id = $7
 		WHERE id = $1
 	`
 
@@ -213,6 +225,8 @@ func (r *WagerRepository) UpdatePendingReference(ctx context.Context, transactio
 		transaction.UpdatedAt(),
 		nextAttemptAt,
 		expiresAt,
+		metadata.CorrelationID,
+		nullableString(metadata.CausationID),
 	)
 	if err != nil {
 		return err
@@ -291,6 +305,126 @@ func (r *WagerRepository) HasProcessedDirectReversal(ctx context.Context, refere
 	}
 
 	return exists, nil
+}
+
+// FindDuePendingReferenceForUpdate locks one pending reference ready for retry.
+func (r *WagerRepository) FindDuePendingReferenceForUpdate(
+	ctx context.Context,
+	now time.Time,
+) (*application.PendingReferenceWork, error) {
+	const query = `
+		SELECT
+			id,
+			reference_retry_count,
+			reference_expires_at,
+			reference_correlation_id,
+			reference_causation_id
+		FROM wager_transactions
+		WHERE status = 'PENDING_REFERENCE'
+		  AND next_reference_attempt_at <= $1
+		ORDER BY next_reference_attempt_at, created_at
+		FOR UPDATE SKIP LOCKED
+		LIMIT 1
+	`
+
+	return r.scanPendingReferenceWork(ctx, db(ctx, r.pool).QueryRow(ctx, query, now))
+}
+
+// FindPendingReferenceForUpdate locks a transaction that is still waiting for its reference.
+func (r *WagerRepository) FindPendingReferenceForUpdate(
+	ctx context.Context,
+	transactionID uuid.UUID,
+) (*application.PendingReferenceWork, error) {
+	const query = `
+		SELECT
+			id,
+			reference_retry_count,
+			reference_expires_at,
+			reference_correlation_id,
+			reference_causation_id
+		FROM wager_transactions
+		WHERE id = $1
+		  AND status = 'PENDING_REFERENCE'
+		FOR UPDATE
+	`
+
+	return r.scanPendingReferenceWork(ctx, db(ctx, r.pool).QueryRow(ctx, query, transactionID))
+}
+
+// scanPendingReferenceWork loads the locked transaction and its retry state.
+func (r *WagerRepository) scanPendingReferenceWork(ctx context.Context, row pgx.Row) (*application.PendingReferenceWork, error) {
+	var (
+		transactionID uuid.UUID
+		retryCount    int
+		expiresAt     time.Time
+		correlationID *string
+		causationID   *string
+	)
+
+	err := row.Scan(
+		&transactionID,
+		&retryCount,
+		&expiresAt,
+		&correlationID,
+		&causationID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrNotFound
+		}
+
+		return nil, err
+	}
+
+	transaction, err := r.FindByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &application.PendingReferenceWork{
+		Transaction: transaction,
+		RetryCount:  retryCount,
+		ExpiresAt:   expiresAt,
+		Metadata: application.CommandMetadata{
+			CorrelationID: stringValue(correlationID),
+			CausationID:   stringValue(causationID),
+		},
+	}, nil
+}
+
+// SchedulePendingReferenceRetry schedules the next durable reference retry.
+func (r *WagerRepository) SchedulePendingReferenceRetry(
+	ctx context.Context,
+	transactionID uuid.UUID,
+	retryCount int,
+	nextAttemptAt time.Time,
+) error {
+	const query = `
+		UPDATE wager_transactions
+		SET
+			reference_retry_count = $2,
+			next_reference_attempt_at = $3,
+			updated_at = clock_timestamp()
+		WHERE id = $1
+		  AND status = 'PENDING_REFERENCE'
+	`
+
+	result, err := db(ctx, r.pool).Exec(
+		ctx,
+		query,
+		transactionID,
+		retryCount,
+		nextAttemptAt,
+	)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return application.ErrNotFound
+	}
+
+	return nil
 }
 
 // mapWagerCreateError translates known database constraints into application errors.

@@ -2,13 +2,16 @@ package httptransport
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 	"github.com/pablo-banker/junglegaming-test/internal/domain"
+	"github.com/pablo-banker/junglegaming-test/internal/observability"
 )
 
 type createWagerRequest struct {
@@ -41,13 +44,15 @@ type wagerService interface {
 type WagerHandler struct {
 	service wagerService
 	logger  *slog.Logger
+	metrics *observability.Metrics
 }
 
 // NewWagerHandler creates a wagering HTTP handler.
-func NewWagerHandler(service *application.WagerService, logger *slog.Logger) *WagerHandler {
+func NewWagerHandler(service *application.WagerService, logger *slog.Logger, metrics *observability.Metrics) *WagerHandler {
 	return &WagerHandler{
 		service: service,
 		logger:  logger,
+		metrics: metrics,
 	}
 }
 
@@ -55,12 +60,12 @@ func NewWagerHandler(service *application.WagerService, logger *slog.Logger) *Wa
 func (h *WagerHandler) Create(c fiber.Ctx) error {
 	principal, ok := PrincipalFromContext(c)
 	if !ok {
-		return fiber.ErrUnauthorized
+		return errUnauthorized
 	}
 
 	var request createWagerRequest
 	if err := c.Bind().Body(&request); err != nil {
-		return BuildErrorResponse(c, h.logger, ResolveError(fiber.ErrBadRequest))
+		return errInvalidPayload
 	}
 
 	if request.ProviderID == "" ||
@@ -72,20 +77,23 @@ func (h *WagerHandler) Create(c fiber.Ctx) error {
 		request.Kind == "" ||
 		request.Money.Amount == "" ||
 		request.Money.Currency == "" {
-		return BuildErrorResponse(c, h.logger, ResolveError(fiber.ErrBadRequest))
+		return errInvalidPayload.withDetails("providerId, externalTransactionId, playerId, walletId, roundId, gameId, kind and money are required")
 	}
 
 	if request.ProviderID != principal.ProviderID {
-		return fiber.ErrForbidden
+		return errForbidden
 	}
 
 	idempotencyKey := c.Get("Idempotency-Key")
 	if idempotencyKey == "" {
-		return BuildErrorResponse(c, h.logger, ResolveError(fiber.ErrBadRequest))
+		return errIdempotencyKeyRequired
 	}
 
+	ctx := observability.WithAttrs(c.Context(), slog.String("walletId", request.WalletID))
+	start := time.Now()
+
 	result, err := h.service.Process(
-		c.Context(),
+		ctx,
 		application.ProcessWagerCommand{
 			ProviderID:                     principal.ProviderID,
 			ExternalTransactionID:          request.ExternalTransactionID,
@@ -100,12 +108,25 @@ func (h *WagerHandler) Create(c fiber.Ctx) error {
 			ReferenceExternalTransactionID: request.ReferenceExternalTransactionID,
 		},
 		application.CommandMetadata{
-			CorrelationID: uuid.NewString(),
+			CorrelationID: correlationID(c),
 		},
 	)
 	if err != nil {
-		return BuildErrorResponse(c, h.logger, ResolveError(err))
+		h.countConflict(err)
+
+		return err
 	}
+
+	h.metrics.ObserveWager("http", request.Kind, string(result.Status), result.IdempotentReplay, time.Since(start))
+	h.logger.InfoContext(
+		ctx,
+		"wager processed",
+		slog.String("transactionId", result.TransactionID.String()),
+		slog.String("kind", request.Kind),
+		slog.String("status", string(result.Status)),
+		slog.String("failureCode", result.FailureCode),
+		slog.Bool("idempotentReplay", result.IdempotentReplay),
+	)
 
 	status := fiber.StatusOK
 
@@ -114,7 +135,7 @@ func (h *WagerHandler) Create(c fiber.Ctx) error {
 		status = fiber.StatusAccepted
 	}
 
-	return BuildSuccessResponse(c, status, createWagerResponse{
+	return c.Status(status).JSON(createWagerResponse{
 		TransactionID:    result.TransactionID,
 		Status:           result.Status,
 		Balance:          result.BalanceAfter,
@@ -127,7 +148,7 @@ func (h *WagerHandler) Create(c fiber.Ctx) error {
 func (h *WagerHandler) GetByID(c fiber.Ctx) error {
 	principal, ok := PrincipalFromContext(c)
 	if !ok {
-		return fiber.ErrUnauthorized
+		return errUnauthorized
 	}
 
 	result, err := h.service.GetByID(c.Context(), principal.ProviderID, c.Params("transactionId"))
@@ -135,20 +156,20 @@ func (h *WagerHandler) GetByID(c fiber.Ctx) error {
 		return err
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusOK, result)
+	return c.JSON(result)
 }
 
 // GetByExternalTransactionID returns a provider wager by external transaction id.
 func (h *WagerHandler) GetByExternalTransactionID(c fiber.Ctx) error {
 	principal, ok := PrincipalFromContext(c)
 	if !ok {
-		return fiber.ErrUnauthorized
+		return errUnauthorized
 	}
 
 	providerID := c.Params("providerId")
 
 	if providerID != principal.ProviderID {
-		return fiber.ErrForbidden
+		return errForbidden
 	}
 
 	result, err := h.service.GetByExternalTransactionID(c.Context(), providerID, c.Params("externalTransactionId"))
@@ -156,5 +177,16 @@ func (h *WagerHandler) GetByExternalTransactionID(c fiber.Ctx) error {
 		return err
 	}
 
-	return BuildSuccessResponse(c, fiber.StatusOK, result)
+	return c.JSON(result)
+}
+
+// countConflict records idempotency conflicts, which point to misbehaving clients.
+func (h *WagerHandler) countConflict(err error) {
+	switch {
+	case errors.Is(err, application.ErrIdempotencyConflict):
+		h.metrics.CountConflict("idempotency_key")
+
+	case errors.Is(err, application.ErrExternalTransactionConflict):
+		h.metrics.CountConflict("external_transaction")
+	}
 }

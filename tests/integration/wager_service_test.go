@@ -25,6 +25,7 @@ func newIntegratedWagerService(
 		postgres.NewWagerRepository(pool),
 		postgres.NewWalletLedgerRepository(pool),
 		postgres.NewOutboxRepository(),
+		application.DefaultReferenceRetryPolicy(),
 	)
 }
 

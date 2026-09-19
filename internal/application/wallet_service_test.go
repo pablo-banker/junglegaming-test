@@ -1,5 +1,3 @@
-//go:build unit
-
 package application
 
 import (
@@ -528,12 +526,11 @@ func TestWalletServiceListLedgerPropagatesLedgerError(t *testing.T) {
 
 // TestWalletServiceReconcileReturnsConsistent verifies matching wallet and ledger balances.
 func TestWalletServiceReconcileReturnsConsistent(t *testing.T) {
-	service, txManager, wallets, _, ledger, _ :=
+	service, _, _, _, ledger, _ :=
 		newWalletServiceForTest()
 
 	wallet := newWalletForTest(t, "100.00")
-	wallets.findByIDForUpdateResult = wallet
-
+	ledger.storedBalance = wallet.Balance()
 	ledger.calculatedBalance = wallet.Balance()
 	ledger.calculatedCount = 3
 
@@ -543,10 +540,6 @@ func TestWalletServiceReconcileReturnsConsistent(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !txManager.called {
-		t.Fatal("expected transaction to be started")
 	}
 
 	if !result.Consistent {
@@ -577,11 +570,11 @@ func TestWalletServiceReconcileReturnsConsistent(t *testing.T) {
 
 // TestWalletServiceReconcileReturnsInconsistent verifies balance mismatches.
 func TestWalletServiceReconcileReturnsInconsistent(t *testing.T) {
-	service, _, wallets, _, ledger, _ :=
+	service, _, _, _, ledger, _ :=
 		newWalletServiceForTest()
 
 	wallet := newWalletForTest(t, "100.00")
-	wallets.findByIDForUpdateResult = wallet
+	ledger.storedBalance = wallet.Balance()
 
 	currency := wallet.Balance().Currency()
 
@@ -646,12 +639,32 @@ func TestWalletServiceReconcileRejectsInvalidWalletID(t *testing.T) {
 	}
 }
 
-// TestWalletServiceReconcilePropagatesWalletError verifies locked wallet lookup failures.
-func TestWalletServiceReconcilePropagatesWalletError(t *testing.T) {
-	service, txManager, wallets, _, _, _ := newWalletServiceForTest()
+// TestWalletServiceReconcileReturnsWalletNotFound verifies unknown wallets.
+func TestWalletServiceReconcileReturnsWalletNotFound(t *testing.T) {
+	service, _, _, _, ledger, _ := newWalletServiceForTest()
 
-	expectedErr := errors.New("wallet lock failed")
-	wallets.findByIDForUpdateErr = expectedErr
+	ledger.calculateErr = ErrNotFound
+
+	result, err := service.Reconcile(
+		context.Background(),
+		uuid.NewString(),
+	)
+
+	if !errors.Is(err, ErrWalletNotFound) {
+		t.Fatalf("expected ErrWalletNotFound, got %v", err)
+	}
+
+	if result != nil {
+		t.Fatal("expected nil result")
+	}
+}
+
+// TestWalletServiceReconcilePropagatesLedgerError verifies ledger reconstruction failures.
+func TestWalletServiceReconcilePropagatesLedgerError(t *testing.T) {
+	service, _, _, _, ledger, _ := newWalletServiceForTest()
+
+	expectedErr := errors.New("ledger calculation failed")
+	ledger.calculateErr = expectedErr
 
 	result, err := service.Reconcile(
 		context.Background(),
@@ -664,37 +677,5 @@ func TestWalletServiceReconcilePropagatesWalletError(t *testing.T) {
 
 	if result != nil {
 		t.Fatal("expected nil result")
-	}
-
-	if !txManager.called {
-		t.Fatal("expected transaction to be started")
-	}
-}
-
-// TestWalletServiceReconcilePropagatesLedgerError verifies ledger reconstruction failures.
-func TestWalletServiceReconcilePropagatesLedgerError(t *testing.T) {
-	service, txManager, wallets, _, ledger, _ := newWalletServiceForTest()
-
-	wallet := newWalletForTest(t, "100.00")
-	wallets.findByIDForUpdateResult = wallet
-
-	expectedErr := errors.New("ledger calculation failed")
-	ledger.calculateErr = expectedErr
-
-	result, err := service.Reconcile(
-		context.Background(),
-		wallet.ID().String(),
-	)
-
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected %v, got %v", expectedErr, err)
-	}
-
-	if result != nil {
-		t.Fatal("expected nil result")
-	}
-
-	if !txManager.called {
-		t.Fatal("expected transaction to be started")
 	}
 }

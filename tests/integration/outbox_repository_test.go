@@ -31,7 +31,7 @@ var outboxRepositoryTestTime = time.Date(
 func newWalletBalanceChangedEvent(
 	t *testing.T,
 	wallet *domain.Wallet,
-) application.EventEnvelope {
+) application.Event[application.WalletBalanceChangedData] {
 	t.Helper()
 
 	zero, err := domain.Zero(wallet.Currency())
@@ -39,25 +39,23 @@ func newWalletBalanceChangedEvent(
 		t.Fatalf("failed to create zero money: %v", err)
 	}
 
-	return application.EventEnvelope{
-		EventID:       uuid.New(),
-		EventType:     application.EventTypeWalletBalanceChanged,
-		AggregateID:   wallet.ID(),
-		CorrelationID: "correlation-123",
-		CausationID:   "wager-123",
-		Version:       application.EventVersion,
-		OccurredAt:    outboxRepositoryTestTime,
-		Payload: application.WalletBalanceChangedPayload{
+	return application.NewWalletBalanceChangedEvent(
+		application.CommandMetadata{
+			CorrelationID: "correlation-123",
+			CausationID:   "wager-123",
+		},
+		outboxRepositoryTestTime,
+		application.WalletBalanceChangedData{
 			WalletID:      wallet.ID(),
 			PlayerID:      wallet.PlayerID(),
 			TransactionID: uuid.New(),
 			Direction:     domain.WalletLedgerDirectionCredit,
-			Amount:        wallet.Balance(),
+			Money:         wallet.Balance(),
 			BalanceBefore: zero,
 			BalanceAfter:  wallet.Balance(),
 			WalletVersion: wallet.Version(),
 		},
-	}
+	)
 }
 
 // cleanupOutboxTest removes data created by an outbox integration test.
@@ -335,8 +333,8 @@ func TestOutboxRepositoryPersistsPayload(t *testing.T) {
 				correlation_id,
 				version,
 				payload ->> 'walletId',
-				payload -> 'amount' ->> 'amount',
-				payload -> 'amount' ->> 'currency',
+				payload -> 'money' ->> 'amount',
+				payload -> 'money' ->> 'currency',
 				payload -> 'balanceBefore' ->> 'amount',
 				payload -> 'balanceAfter' ->> 'amount',
 				published_at IS NULL,
@@ -384,10 +382,9 @@ func TestOutboxRepositoryPersistsPayload(t *testing.T) {
 		)
 	}
 
-	if version != application.EventVersion {
+	if version != 1 {
 		t.Errorf(
-			"expected version %d, got %d",
-			application.EventVersion,
+			"expected version 1, got %d",
 			version,
 		)
 	}

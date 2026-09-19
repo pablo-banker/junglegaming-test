@@ -90,13 +90,13 @@ func TestE2ETwoConcurrentBetsCannotOverspend(t *testing.T) {
 			t.Fatalf("expected status 200, got %d: %s", result.status, result.body)
 		}
 
-		var envelope successResponse[wagerProcessResponse]
+		var envelope wagerProcessResponse
 
 		if err := json.Unmarshal(result.body, &envelope); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		switch envelope.Data.Status {
+		switch envelope.Status {
 		case "PROCESSED":
 			processed++
 
@@ -104,7 +104,7 @@ func TestE2ETwoConcurrentBetsCannotOverspend(t *testing.T) {
 			rejected++
 
 		default:
-			t.Fatalf("unexpected wager status %s", envelope.Data.Status)
+			t.Fatalf("unexpected wager status %s", envelope.Status)
 		}
 	}
 
@@ -171,15 +171,15 @@ func TestE2ESameBetFiftyTimesMovesMoneyOnce(t *testing.T) {
 			t.Fatalf("expected status 200, got %d: %s", result.status, result.body)
 		}
 
-		var envelope successResponse[wagerProcessResponse]
+		var envelope wagerProcessResponse
 
 		if err := json.Unmarshal(result.body, &envelope); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
 
-		transactionIDs[envelope.Data.TransactionID] = true
+		transactionIDs[envelope.TransactionID] = true
 
-		if envelope.Data.IdempotentReplay {
+		if envelope.IdempotentReplay {
 			replays++
 		} else {
 			firstProcessing++

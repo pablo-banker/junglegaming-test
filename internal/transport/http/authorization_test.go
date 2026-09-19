@@ -1,8 +1,7 @@
-//go:build unit
-
 package httptransport
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 // TestRequireProviderAllowsProvider verifies provider authorization.
 func TestRequireProviderAllowsProvider(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
@@ -25,8 +24,7 @@ func TestRequireProviderAllowsProvider(t *testing.T) {
 					"provider",
 				},
 			},
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -65,7 +63,7 @@ func TestRequireProviderAllowsProvider(t *testing.T) {
 
 // TestRequireProviderRejectsInternal verifies internal identities cannot use provider routes.
 func TestRequireProviderRejectsInternal(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
@@ -75,8 +73,7 @@ func TestRequireProviderRejectsInternal(t *testing.T) {
 					"internal",
 				},
 			},
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -115,7 +112,7 @@ func TestRequireProviderRejectsInternal(t *testing.T) {
 
 // TestRequireInternalAllowsInternal verifies internal service authorization.
 func TestRequireInternalAllowsInternal(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
@@ -125,8 +122,7 @@ func TestRequireInternalAllowsInternal(t *testing.T) {
 					"internal",
 				},
 			},
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",
@@ -165,7 +161,7 @@ func TestRequireInternalAllowsInternal(t *testing.T) {
 
 // TestRequireInternalRejectsProvider verifies providers cannot use internal routes.
 func TestRequireInternalRejectsProvider(t *testing.T) {
-	app := fiber.New()
+	app := newTestFiberApp()
 
 	middleware := NewAuthMiddleware(
 		&fakeTokenVerifier{
@@ -176,8 +172,7 @@ func TestRequireInternalRejectsProvider(t *testing.T) {
 					"provider",
 				},
 			},
-		},
-	)
+		}, slog.New(slog.DiscardHandler))
 
 	app.Get(
 		"/protected",

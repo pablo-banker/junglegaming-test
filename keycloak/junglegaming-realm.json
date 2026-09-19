@@ -3,7 +3,6 @@
   "displayName": "Jungle Gaming",
   "enabled": true,
   "sslRequired": "external",
-
   "registrationAllowed": false,
   "registrationEmailAsUsername": false,
   "rememberMe": false,
@@ -11,9 +10,7 @@
   "loginWithEmailAllowed": false,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": false,
-
   "accessTokenLifespan": 300,
-
   "roles": {
     "realm": [
       {
@@ -26,29 +23,22 @@
       }
     ]
   },
-
   "clients": [
     {
       "clientId": "provider-a",
       "name": "Provider A",
       "description": "Machine-to-machine client for Provider A",
-
       "enabled": true,
       "protocol": "openid-connect",
-
       "publicClient": false,
       "bearerOnly": false,
       "clientAuthenticatorType": "client-secret",
-
       "secret": "${KEYCLOAK_PROVIDER_A_CLIENT_SECRET}",
-
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-
       "fullScopeAllowed": true,
-
       "protocolMappers": [
         {
           "name": "provider-id",
@@ -79,28 +69,21 @@
         }
       ]
     },
-
     {
       "clientId": "provider-b",
       "name": "Provider B",
       "description": "Machine-to-machine client for Provider B",
-
       "enabled": true,
       "protocol": "openid-connect",
-
       "publicClient": false,
       "bearerOnly": false,
       "clientAuthenticatorType": "client-secret",
-
       "secret": "${KEYCLOAK_PROVIDER_B_CLIENT_SECRET}",
-
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-
       "fullScopeAllowed": true,
-
       "protocolMappers": [
         {
           "name": "provider-id",
@@ -131,28 +114,21 @@
         }
       ]
     },
-
     {
       "clientId": "internal-service",
       "name": "Internal Service",
       "description": "Trusted Jungle Gaming internal service",
-
       "enabled": true,
       "protocol": "openid-connect",
-
       "publicClient": false,
       "bearerOnly": false,
       "clientAuthenticatorType": "client-secret",
-
       "secret": "${KEYCLOAK_INTERNAL_CLIENT_SECRET}",
-
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-
       "fullScopeAllowed": true,
-
       "protocolMappers": [
         {
           "name": "junglegaming-api-audience",
@@ -167,9 +143,56 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "provider-a-short-lived",
+      "name": "Provider A (short-lived tokens)",
+      "description": "Test identity for provider-a whose access tokens expire after 1 second; used to verify expired tokens are rejected",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_SHORT_LIVED_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "provider-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "provider_id",
+            "claim.value": "provider-a",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "junglegaming-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "junglegaming-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "attributes": {
+        "access.token.lifespan": "1"
+      }
     }
   ],
-
   "users": [
     {
       "username": "service-account-provider-a",
@@ -193,6 +216,14 @@
       "serviceAccountClientId": "internal-service",
       "realmRoles": [
         "internal"
+      ]
+    },
+    {
+      "username": "service-account-provider-a-short-lived",
+      "enabled": true,
+      "serviceAccountClientId": "provider-a-short-lived",
+      "realmRoles": [
+        "provider"
       ]
     }
   ]

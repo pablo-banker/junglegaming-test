@@ -1,11 +1,13 @@
 package httptransport
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/pablo-banker/junglegaming-test/internal/auth"
+	"github.com/pablo-banker/junglegaming-test/internal/observability"
 )
 
 type authContextKey string
@@ -15,12 +17,14 @@ const principalContextKey authContextKey = "principal"
 // AuthMiddleware authenticates requests using bearer access tokens.
 type AuthMiddleware struct {
 	verifier auth.TokenVerifier
+	logger   *slog.Logger
 }
 
 // NewAuthMiddleware creates an authentication middleware.
-func NewAuthMiddleware(verifier auth.TokenVerifier) *AuthMiddleware {
+func NewAuthMiddleware(verifier auth.TokenVerifier, logger *slog.Logger) *AuthMiddleware {
 	return &AuthMiddleware{
 		verifier: verifier,
+		logger:   logger,
 	}
 }
 
@@ -28,7 +32,7 @@ func NewAuthMiddleware(verifier auth.TokenVerifier) *AuthMiddleware {
 func (m *AuthMiddleware) Authenticate(c fiber.Ctx) error {
 	token, ok := bearerToken(c.Get(fiber.HeaderAuthorization))
 	if !ok {
-		return unauthorized(c)
+		return errUnauthorized
 	}
 
 	principal, err := m.verifier.Verify(
@@ -36,10 +40,18 @@ func (m *AuthMiddleware) Authenticate(c fiber.Ctx) error {
 		token,
 	)
 	if err != nil {
-		return unauthorized(c)
+		// The reason (expired, wrong audience, bad signature) never includes the token itself.
+		m.logger.WarnContext(c.Context(), "access token rejected", slog.Any("reason", err))
+
+		return errUnauthorized
 	}
 
 	c.Locals(principalContextKey, principal)
+	c.SetContext(observability.WithAttrs(
+		c.Context(),
+		slog.String("clientId", principal.ClientID),
+		slog.String("providerId", principal.ProviderID),
+	))
 
 	return c.Next()
 }
@@ -70,11 +82,4 @@ func bearerToken(header string) (string, bool) {
 	}
 
 	return parts[1], true
-}
-
-// unauthorized returns a standardized authentication error.
-func unauthorized(c fiber.Ctx) error {
-	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-		"error": "unauthorized",
-	})
 }

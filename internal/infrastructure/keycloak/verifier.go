@@ -3,7 +3,9 @@ package keycloak
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 
@@ -16,10 +18,13 @@ type Verifier struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-// NewVerifier creates a Keycloak token verifier.
+// jwksTimeout bounds each download of the signing keys, so an unreachable IdP fails fast.
+const jwksTimeout = 5 * time.Second
+
+// NewVerifier creates a Keycloak token verifier; go-oidc checks signature, issuer, audience and expiry.
 func NewVerifier(cfg config.Config) *Verifier {
 	keySet := oidc.NewRemoteKeySet(
-		context.Background(),
+		oidc.ClientContext(context.Background(), &http.Client{Timeout: jwksTimeout}),
 		cfg.KeycloakJWKSURL,
 	)
 
@@ -63,6 +68,15 @@ func (v *Verifier) Verify(
 			"%w: failed to decode claims: %v",
 			auth.ErrInvalidToken,
 			err,
+		)
+	}
+
+	// Keycloak marks access tokens as Bearer; ID and refresh tokens are not accepted.
+	if claims.Type != "Bearer" {
+		return auth.Principal{}, fmt.Errorf(
+			"%w: token type %q is not an access token",
+			auth.ErrInvalidToken,
+			claims.Type,
 		)
 	}
 

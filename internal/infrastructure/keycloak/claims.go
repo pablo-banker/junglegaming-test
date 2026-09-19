@@ -7,6 +7,7 @@ type RealmAccess struct {
 
 // Claims contains identity information extracted from a Keycloak access token.
 type Claims struct {
+	Type            string      `json:"typ"`
 	Subject         string      `json:"sub"`
 	AuthorizedParty string      `json:"azp"`
 	ProviderID      string      `json:"provider_id"`
