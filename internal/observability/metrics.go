@@ -7,8 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Metrics records the operational metrics of the service. A nil *Metrics records nothing,
-// which keeps tests free of metric setup.
+// Metrics records the operational metrics of the service; a nil *Metrics records nothing.
 type Metrics struct {
 	wagerOutcomes             *prometheus.CounterVec
 	idempotentReplays         *prometheus.CounterVec

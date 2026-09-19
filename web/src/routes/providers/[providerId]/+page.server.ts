@@ -9,8 +9,7 @@ import type { LedgerView, OperationResult, TransactionView, WagerKind, WagerPayl
 
 import type { Actions, PageServerLoad } from './$types';
 
-// This area acts as an external provider: everything goes through Keycloak and the Go API,
-// never through the database.
+// This area acts as an external provider: everything goes through Keycloak and the Go API.
 
 const WALLETS_COOKIE = 'test-wallets';
 const MAX_WALLETS = 15;
@@ -124,10 +123,7 @@ export const actions: Actions = {
 		cookies.set(WALLETS_COOKIE, JSON.stringify(wallets), { path: '/', httpOnly: true, sameSite: 'lax', maxAge: 60 * 60 * 24 * 30 });
 	},
 
-	/**
-	 * Sends a wager operation as the provider and records what the API reports around it:
-	 * the wallet before and after, the persisted transaction and its ledger entry.
-	 */
+	/** Sends a wager operation as the provider and records what the API reports around it. */
 	operate: async ({ params, request }) => {
 		const provider = providerOf(params.providerId);
 		const form = await request.formData();

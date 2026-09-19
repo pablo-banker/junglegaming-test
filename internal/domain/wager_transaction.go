@@ -20,8 +20,7 @@ const (
 
 type WagerTransactionStatus string
 
-// maxIdentifierLength bounds provider supplied identifiers such as external ids, idempotency
-// keys, rounds and games. It keeps them far below the PostgreSQL index entry limit.
+// maxIdentifierLength bounds provider supplied identifiers, far below the PostgreSQL index limit.
 const maxIdentifierLength = 255
 
 const (

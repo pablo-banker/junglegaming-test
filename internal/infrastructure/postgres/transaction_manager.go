@@ -33,12 +33,7 @@ func NewTransactionManager(pool *pgxpool.Pool) *TransactionManager {
 	}
 }
 
-// WithinTransaction executes the function inside a PostgreSQL transaction.
-//
-// Nested calls join the active transaction. The outermost call retries a bounded number
-// of times when PostgreSQL aborts it with a deadlock or serialization failure, so fn must
-// not keep state between attempts. Failures of an unavailable database are wrapped with
-// application.ErrUnavailable.
+// WithinTransaction runs fn inside a PostgreSQL transaction, retrying conflicts a bounded number of times.
 func (m *TransactionManager) WithinTransaction(
 	ctx context.Context,
 	fn func(context.Context) error,

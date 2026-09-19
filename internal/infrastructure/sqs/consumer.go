@@ -43,9 +43,7 @@ type wagerMessageHandler interface {
 	Handle(ctx context.Context, messageID string, body string) error
 }
 
-// Consumer receives wager messages and settles each one according to its outcome:
-// success deletes it, a transient failure delays it with backoff and a permanent
-// failure moves it to the DLQ at once.
+// Consumer receives wager messages and deletes, delays or dead-letters each one by its outcome.
 type Consumer struct {
 	client   consumerClient
 	handler  wagerMessageHandler
@@ -73,9 +71,7 @@ func NewConsumer(
 	}
 }
 
-// PollOnce receives one batch and processes it. Receiving stops as soon as stop is
-// cancelled; messages already received are processed with work, and the ones not yet
-// started are handed back to the queue for another consumer.
+// PollOnce receives one batch and processes it, handing messages back when stop is cancelled.
 func (c *Consumer) PollOnce(stop context.Context, work context.Context) (bool, error) {
 	result, err := c.client.ReceiveMessage(stop, &awssqs.ReceiveMessageInput{
 		QueueUrl:            aws.String(c.queueURL),

@@ -21,7 +21,6 @@ var (
 	ErrConcurrentUpdate            = errors.New("concurrent update detected")
 
 	// ErrUnavailable marks failures caused by a temporarily unavailable dependency.
-	// The same request may succeed later without changes.
 	ErrUnavailable = errors.New("dependency temporarily unavailable")
 )
 

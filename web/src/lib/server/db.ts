@@ -2,11 +2,7 @@ import postgres from 'postgres';
 
 import { config } from './config';
 
-/**
- * Read-only connection used by the interface. Every session starts with
- * default_transaction_read_only, so the interface can observe the database but never
- * change it: money only moves through the API and SQS, like a real provider.
- */
+/** Read-only connection: the interface observes the database but never changes it. */
 export const sql = postgres(config.databaseUrl, {
 	max: 5,
 	idle_timeout: 30,

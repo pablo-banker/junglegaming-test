@@ -10,8 +10,7 @@ import (
 
 type contextAttrsKey struct{}
 
-// WithAttrs returns a context whose log records carry the given attributes, such as
-// correlationId, messageId, transactionId, walletId and providerId.
+// WithAttrs returns a context whose log records carry the given attributes.
 func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 	existing, _ := ctx.Value(contextAttrsKey{}).([]slog.Attr)
 

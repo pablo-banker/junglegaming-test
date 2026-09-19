@@ -19,7 +19,6 @@ type correlationContextKey struct{}
 var correlationIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 // requestContext assigns the request correlation id and writes one access log per request.
-// The correlation id is echoed in the response and attached to every log of the request.
 func requestContext(logger *slog.Logger) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		correlationID := c.Get(correlationHeader)

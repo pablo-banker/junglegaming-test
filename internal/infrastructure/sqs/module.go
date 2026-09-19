@@ -28,7 +28,6 @@ var Module = fx.Module(
 )
 
 // registerConsumer runs the wager queue consumer for the application lifetime.
-// Receives long-poll, so the loop does not pause between empty batches.
 func registerConsumer(lifecycle fx.Lifecycle, consumer *Consumer, logger *slog.Logger) {
 	worker.Register(lifecycle, worker.NewLoop(
 		"sqs-wager-consumer",

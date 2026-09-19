@@ -22,8 +22,7 @@ func NewPool(
 		return nil, fmt.Errorf("failed to parse database url: %w", err)
 	}
 
-	// Bound every wait so a stuck lock or query surfaces as a retryable 503 instead of
-	// holding connections, and name the connections for pg_stat_activity.
+	// Bound every wait so a stuck lock or query surfaces as a retryable 503.
 	runtimeParams := poolConfig.ConnConfig.RuntimeParams
 	runtimeParams["application_name"] = "junglegaming"
 	runtimeParams["lock_timeout"] = "5s"

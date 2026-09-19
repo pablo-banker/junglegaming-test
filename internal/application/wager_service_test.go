@@ -1000,8 +1000,7 @@ func newPendingRefundWork(t *testing.T, wallet *domain.Wallet) *PendingReference
 	}
 }
 
-// TestRetryNextPendingReferenceMarksPermanentFailureAsFailed verifies a deterministic error
-// cannot keep a pending reference at the head of the queue forever.
+// TestRetryNextPendingReferenceMarksPermanentFailureAsFailed verifies a deterministic error cannot block the queue.
 func TestRetryNextPendingReferenceMarksPermanentFailureAsFailed(t *testing.T) {
 	service, _, wallets, wagers, _, _ := newWagerServiceForTest()
 
@@ -1028,8 +1027,7 @@ func TestRetryNextPendingReferenceMarksPermanentFailureAsFailed(t *testing.T) {
 	}
 }
 
-// TestRetryNextPendingReferenceKeepsTransientFailurePending verifies an unavailable
-// dependency never turns a pending reference into a terminal state.
+// TestRetryNextPendingReferenceKeepsTransientFailurePending verifies an unavailable dependency keeps it pending.
 func TestRetryNextPendingReferenceKeepsTransientFailurePending(t *testing.T) {
 	service, _, wallets, wagers, _, _ := newWagerServiceForTest()
 

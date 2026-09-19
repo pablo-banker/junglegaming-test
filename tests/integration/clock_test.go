@@ -44,7 +44,6 @@ func TestPostgresClockReturnsDatabaseTime(t *testing.T) {
 }
 
 // TestPostgresClockAdvancesInsideTransaction verifies the clock is not frozen at BEGIN.
-// Reading it after the wallet lock must observe time after the previous committed movement.
 func TestPostgresClockAdvancesInsideTransaction(t *testing.T) {
 	ctx := integrationContext(t)
 	pool := openIntegrationPool(t)

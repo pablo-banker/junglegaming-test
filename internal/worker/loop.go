@@ -11,10 +11,7 @@ import (
 	"github.com/pablo-banker/junglegaming-test/internal/application"
 )
 
-// Step performs one unit of background work and reports whether it found any.
-//
-// stop is cancelled when shutdown starts: a step must not start new work after it.
-// work is cancelled only when the shutdown deadline expires, so in-flight work can finish.
+// Step performs one unit of work; stop is cancelled at shutdown, work only at its deadline.
 type Step func(stop context.Context, work context.Context) (bool, error)
 
 // Options configures the pauses of a Loop.
@@ -71,8 +68,7 @@ func (l *Loop) Start() {
 	l.logger.Info("worker started")
 }
 
-// Stop stops fetching new work and waits for the in-flight step. When ctx expires first,
-// the in-flight work is cancelled: its transaction rolls back and is retried later.
+// Stop stops fetching new work and waits for the in-flight step until ctx expires.
 func (l *Loop) Stop(ctx context.Context) error {
 	l.mu.Lock()
 

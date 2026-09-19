@@ -97,8 +97,7 @@ func openApplicationRolePool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// TestApplicationRoleCannotRewriteHistory verifies the runtime role can process wagers but
-// cannot update, delete or truncate the ledger, delete financial records or bypass triggers.
+// TestApplicationRoleCannotRewriteHistory verifies the runtime role cannot rewrite financial history.
 func TestApplicationRoleCannotRewriteHistory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

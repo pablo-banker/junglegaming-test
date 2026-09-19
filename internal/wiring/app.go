@@ -19,8 +19,7 @@ import (
 	"github.com/pablo-banker/junglegaming-test/internal/worker"
 )
 
-// App composes the whole service. Modules only declare constructors; lifecycle hooks
-// start the pool first and the HTTP server last, and stop them in reverse order.
+// App composes the whole service; hooks start the pool first and the HTTP server last.
 var App = fx.Options(
 	fx.WithLogger(fxLogger),
 	config.Module,

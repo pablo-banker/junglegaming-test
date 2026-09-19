@@ -182,8 +182,7 @@ func TestSQSWorkerLifecycleStartsAndStopsWithFx(t *testing.T) {
 		cfg,
 	)
 
-	// Publish before Fx starts. Starting the app must activate the worker
-	// and consume this pending message.
+	// Publish before Fx starts: starting the app must activate the worker.
 	err = publisher.Send(
 		ctx,
 		body,

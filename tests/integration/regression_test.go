@@ -113,8 +113,7 @@ func processConcurrently(
 	return results, errs
 }
 
-// TestConcurrentBetsOnSameWalletNeverFail is a regression test for the deadlock between
-// FOR UPDATE and foreign key locks, and for timestamps read before the wallet lock.
+// TestConcurrentBetsOnSameWalletNeverFail is a regression test for the FK deadlock and early timestamps.
 func TestConcurrentBetsOnSameWalletNeverFail(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -263,9 +262,7 @@ func drainPendingReferences(
 	return nil
 }
 
-// TestPendingReferencesResolveOrRejectWithoutBlocking verifies a REFUND received before
-// its BET is applied later, and that a mismatching reference is rejected instead of
-// being retried forever at the head of the queue.
+// TestPendingReferencesResolveOrRejectWithoutBlocking verifies a late reference applies and a mismatch is rejected.
 func TestPendingReferencesResolveOrRejectWithoutBlocking(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

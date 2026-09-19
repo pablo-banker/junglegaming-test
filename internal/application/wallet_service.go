@@ -201,7 +201,6 @@ func (s *WalletService) ListLedger(
 }
 
 // Reconcile compares the stored wallet balance with the balance rebuilt from the ledger.
-// It only reads data and never changes the wallet.
 func (s *WalletService) Reconcile(ctx context.Context, walletID string) (*WalletReconciliationResult, error) {
 	id, err := uuid.Parse(walletID)
 	if err != nil || id == uuid.Nil {

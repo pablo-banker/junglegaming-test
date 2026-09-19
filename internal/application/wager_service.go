@@ -48,11 +48,7 @@ func NewWagerService(
 	}
 }
 
-// Process executes a wager operation atomically.
-//
-// The transaction row is inserted first, so concurrent duplicates wait on the unique
-// indexes and replay the committed result. The wallet is locked next, and the clock is
-// read only after the lock: movements of the same wallet observe non-decreasing times.
+// Process executes a wager operation atomically: insert, lock the wallet, then read the clock.
 func (s *WagerService) Process(ctx context.Context, command ProcessWagerCommand, metadata CommandMetadata) (*ProcessWagerResult, error) {
 	if strings.TrimSpace(metadata.CorrelationID) == "" {
 		return nil, ErrInvalidCorrelationID

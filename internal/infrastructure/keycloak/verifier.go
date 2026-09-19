@@ -21,8 +21,7 @@ type Verifier struct {
 // jwksTimeout bounds each download of the signing keys, so an unreachable IdP fails fast.
 const jwksTimeout = 5 * time.Second
 
-// NewVerifier creates a Keycloak token verifier. Signature, issuer, audience and expiry
-// are checked by go-oidc; keys are cached and refreshed when an unknown key id appears.
+// NewVerifier creates a Keycloak token verifier; go-oidc checks signature, issuer, audience and expiry.
 func NewVerifier(cfg config.Config) *Verifier {
 	keySet := oidc.NewRemoteKeySet(
 		oidc.ClientContext(context.Background(), &http.Client{Timeout: jwksTimeout}),

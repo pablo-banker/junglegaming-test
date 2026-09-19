@@ -24,8 +24,7 @@ func NewRouter(
 		AppName:      "Jungle Gaming Backend Challenge",
 		ErrorHandler: newErrorHandler(logger),
 
-		// Wager and wallet requests are a few hundred bytes; timeouts protect the server
-		// from slow clients holding connections open.
+		// Requests are small; the limits protect the server from slow clients holding connections.
 		BodyLimit:    16 * 1024,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 15 * time.Second,

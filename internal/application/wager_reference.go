@@ -60,7 +60,6 @@ type referenceOutcome struct {
 }
 
 // PendingReferenceRetry is the outcome of one pending reference retry.
-// Status stays PENDING_REFERENCE when the retry was rescheduled.
 type PendingReferenceRetry struct {
 	TransactionID uuid.UUID
 	Kind          domain.WagerTransactionType
@@ -68,12 +67,7 @@ type PendingReferenceRetry struct {
 	FailureCode   string
 }
 
-// RetryNextPendingReference retries one due pending reference transaction and returns
-// nil when nothing is due.
-//
-// Transient failures leave the transaction untouched for the next cycle. Any other
-// unexpected failure is deterministic and would block the queue forever, so the
-// transaction is finished as FAILED for audit.
+// RetryNextPendingReference retries one due pending reference and returns nil when nothing is due.
 func (s *WagerService) RetryNextPendingReference(ctx context.Context) (*PendingReferenceRetry, error) {
 	var claimed *domain.WagerTransaction
 
@@ -192,8 +186,7 @@ func (s *WagerService) retryPendingReference(ctx context.Context, work *PendingR
 	return err
 }
 
-// failPendingReference finishes a pending reference as FAILED after a permanent processing
-// error. It returns nil when another instance already finished the transaction.
+// failPendingReference finishes a pending reference as FAILED after a permanent error.
 func (s *WagerService) failPendingReference(ctx context.Context, transactionID uuid.UUID) (*domain.WagerTransaction, error) {
 	var failed *domain.WagerTransaction
 

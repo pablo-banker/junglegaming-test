@@ -148,8 +148,7 @@ func TestConsumerRequestsFIFOAttributes(t *testing.T) {
 	}
 }
 
-// TestConsumerDelaysTransientFailuresWithBackoff verifies transient failures are retried later
-// with exponential backoff and stop the rest of the batch.
+// TestConsumerDelaysTransientFailuresWithBackoff verifies transient failures are retried with backoff.
 func TestConsumerDelaysTransientFailuresWithBackoff(t *testing.T) {
 	consumer, client, handler := newConsumerForTest(testMessage("m1", 3), testMessage("m2", 1))
 
@@ -184,8 +183,7 @@ func TestConsumerDelaysTransientFailuresWithBackoff(t *testing.T) {
 	}
 }
 
-// TestConsumerMovesPermanentFailuresToDLQ verifies permanent failures reach the DLQ at once
-// without blocking the rest of the batch.
+// TestConsumerMovesPermanentFailuresToDLQ verifies permanent failures reach the DLQ at once.
 func TestConsumerMovesPermanentFailuresToDLQ(t *testing.T) {
 	consumer, client, handler := newConsumerForTest(testMessage("m1", 1), testMessage("m2", 1))
 
@@ -216,8 +214,7 @@ func TestConsumerMovesPermanentFailuresToDLQ(t *testing.T) {
 	}
 }
 
-// TestConsumerReleasesUnstartedMessagesOnShutdown verifies received messages are handed
-// back immediately when shutdown starts.
+// TestConsumerReleasesUnstartedMessagesOnShutdown verifies received messages are handed back on shutdown.
 func TestConsumerReleasesUnstartedMessagesOnShutdown(t *testing.T) {
 	consumer, client, handler := newConsumerForTest(testMessage("m1", 1), testMessage("m2", 1))
 

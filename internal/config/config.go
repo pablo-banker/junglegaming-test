@@ -24,8 +24,7 @@ type Config struct {
 	SQSDLQURL         string
 	SQSEventQueueURL  string
 
-	// SQSAllowedProviders are the providers accepted in SQS messages. The broker grants
-	// SendMessage per provider; the consumer still rejects any other providerId.
+	// SQSAllowedProviders are the providers accepted in SQS messages.
 	SQSAllowedProviders []string
 
 	ReferenceRetryInitialDelay time.Duration

@@ -26,7 +26,6 @@ func NewBacklogRepository(pool *pgxpool.Pool) *BacklogRepository {
 }
 
 // Read counts unpublished outbox events, the age of the oldest one and pending references.
-// Both filters match partial indexes, so the query stays cheap on every scrape.
 func (r *BacklogRepository) Read(ctx context.Context) (Backlog, error) {
 	const query = `
 		SELECT

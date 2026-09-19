@@ -8,8 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// isRetryableConflict reports deadlocks and serialization failures. PostgreSQL aborts
-// one of the competing transactions, which can safely run again from the start.
+// isRetryableConflict reports deadlocks and serialization failures, which can safely run again.
 func isRetryableConflict(err error) bool {
 	var pgErr *pgconn.PgError
 

@@ -87,14 +87,6 @@ func (r wagerRequest) newTransaction(createdAt time.Time) (*domain.WagerTransact
 }
 
 // hash returns the SHA-256 (hex) of the canonical JSON of the business fields.
-//
-// Canonical form: object keys sorted lexicographically at every level, no insignificant
-// whitespace, no HTML escaping, UTF-8. Fields: externalTransactionId, gameId, kind,
-// money{amount,currency}, playerId, providerId, referenceExternalTransactionId (only when
-// present), roundId and walletId. The idempotency key and transport metadata are excluded.
-// Normalization: UUIDs use their lowercase canonical form; money is already canonical
-// because only fixed two-decimal amounts are accepted; other strings are used as received.
-// HTTP and SQS build the same ProcessWagerCommand, so equal operations hash equally.
 func (r wagerRequest) hash() (string, error) {
 	fields := map[string]any{
 		"externalTransactionId": r.command.ExternalTransactionID,

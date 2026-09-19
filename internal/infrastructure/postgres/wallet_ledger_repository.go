@@ -211,8 +211,7 @@ func (r *WalletLedgerRepository) ListByWallet(
 	return entries, nil
 }
 
-// ReconciliationSnapshot reads the stored balance and rebuilds it from the ledger in a
-// single statement, so both values come from the same snapshot without locking the wallet.
+// ReconciliationSnapshot reads the stored balance and rebuilds it from the ledger in one statement.
 func (r *WalletLedgerRepository) ReconciliationSnapshot(ctx context.Context, walletID uuid.UUID) (*application.ReconciliationSnapshot, error) {
 	const query = `
 		SELECT

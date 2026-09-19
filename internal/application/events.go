@@ -21,8 +21,7 @@ const (
 	eventVersion int64 = 1
 )
 
-// Event is an integration event with typed data. Only the constructors below create
-// events, so the type and version always match the data.
+// Event is an integration event with typed data, built only by the constructors below.
 type Event[T any] struct {
 	EventID       uuid.UUID
 	EventType     EventType
@@ -141,22 +140,22 @@ type WagerTransactionPendingReferenceData struct {
 	Money                          domain.Money                `json:"money"`
 }
 
-// NewWagerTransactionProcessedEvent creates a WagerTransactionProcessed event for the transaction aggregate.
+// NewWagerTransactionProcessedEvent creates a WagerTransactionProcessed event.
 func NewWagerTransactionProcessedEvent(metadata CommandMetadata, occurredAt time.Time, data WagerTransactionProcessedData) Event[WagerTransactionProcessedData] {
 	return newEvent(EventTypeWagerTransactionProcessed, data.TransactionID, metadata, occurredAt, data)
 }
 
-// NewWagerTransactionRejectedEvent creates a WagerTransactionRejected event for the transaction aggregate.
+// NewWagerTransactionRejectedEvent creates a WagerTransactionRejected event.
 func NewWagerTransactionRejectedEvent(metadata CommandMetadata, occurredAt time.Time, data WagerTransactionRejectedData) Event[WagerTransactionRejectedData] {
 	return newEvent(EventTypeWagerTransactionRejected, data.TransactionID, metadata, occurredAt, data)
 }
 
-// NewWalletBalanceChangedEvent creates a WalletBalanceChanged event for the wallet aggregate.
+// NewWalletBalanceChangedEvent creates a WalletBalanceChanged event.
 func NewWalletBalanceChangedEvent(metadata CommandMetadata, occurredAt time.Time, data WalletBalanceChangedData) Event[WalletBalanceChangedData] {
 	return newEvent(EventTypeWalletBalanceChanged, data.WalletID, metadata, occurredAt, data)
 }
 
-// NewWagerTransactionPendingReferenceEvent creates a WagerTransactionPendingReference event for the transaction aggregate.
+// NewWagerTransactionPendingReferenceEvent creates a WagerTransactionPendingReference event.
 func NewWagerTransactionPendingReferenceEvent(metadata CommandMetadata, occurredAt time.Time, data WagerTransactionPendingReferenceData) Event[WagerTransactionPendingReferenceData] {
 	return newEvent(EventTypeWagerTransactionPendingReference, data.TransactionID, metadata, occurredAt, data)
 }

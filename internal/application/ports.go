@@ -50,8 +50,7 @@ type WalletLedgerRepository interface {
 	ReconciliationSnapshot(ctx context.Context, walletID uuid.UUID) (*ReconciliationSnapshot, error)
 }
 
-// ReconciliationSnapshot is the stored wallet balance and its ledger reconstruction,
-// read by a single statement so both come from the same database snapshot.
+// ReconciliationSnapshot is the stored wallet balance and its ledger reconstruction, read together.
 type ReconciliationSnapshot struct {
 	StoredBalance     domain.Money
 	CalculatedBalance domain.Money

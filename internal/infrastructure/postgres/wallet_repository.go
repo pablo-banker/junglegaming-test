@@ -85,11 +85,7 @@ func (r *WalletRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.
 	)
 }
 
-// FindByIDForUpdate returns and locks a wallet for financial modification.
-//
-// FOR NO KEY UPDATE serializes writers of the same wallet while staying compatible with
-// the FOR KEY SHARE locks taken by foreign key checks of wager and ledger inserts.
-// FOR UPDATE would conflict with those locks and deadlock concurrent wagers.
+// FindByIDForUpdate locks a wallet with FOR NO KEY UPDATE; FOR UPDATE would deadlock with the FK locks.
 func (r *WalletRepository) FindByIDForUpdate(ctx context.Context, id uuid.UUID) (*domain.Wallet, error) {
 	tx, ok := txFromContext(ctx)
 	if !ok {
@@ -141,9 +137,7 @@ func (r *WalletRepository) FindByPlayerAndCurrency(ctx context.Context, playerID
 	)
 }
 
-// Update persists the mutable financial state of a wallet.
-//
-// The version predicate rejects a lost update even if a caller forgot to lock the wallet.
+// Update persists the mutable financial state of a wallet, rejecting a lost update by version.
 func (r *WalletRepository) Update(ctx context.Context, wallet *domain.Wallet) error {
 	tx, ok := txFromContext(ctx)
 	if !ok {

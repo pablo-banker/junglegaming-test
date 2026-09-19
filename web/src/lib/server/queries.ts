@@ -72,9 +72,7 @@ function toTransaction(row: TransactionRow): Transaction {
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Wallets and ledger
-// ---------------------------------------------------------------------------
 
 /** Lists wallets, most recently changed first. */
 export async function listWallets(limit = 100): Promise<Wallet[]> {
@@ -166,9 +164,7 @@ export async function reconcileWallets(walletIds?: string[], limit = 100): Promi
 	return rows;
 }
 
-// ---------------------------------------------------------------------------
 // Transactions
-// ---------------------------------------------------------------------------
 
 export type TransactionFilter = {
 	providerId?: string;
@@ -321,9 +317,7 @@ export async function listPendingReferences(): Promise<Transaction[]> {
 	return rows.map(toTransaction);
 }
 
-// ---------------------------------------------------------------------------
 // Overview, outbox and inbox
-// ---------------------------------------------------------------------------
 
 export type Overview = {
 	wallets: number;

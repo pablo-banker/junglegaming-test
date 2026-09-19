@@ -56,8 +56,7 @@ func NewWagerMessageHandler(
 	}
 }
 
-// Handle processes one SQS wager message transactionally. The inbox registration, the
-// financial changes, the outbox events and the inbox completion share one transaction.
+// Handle processes one SQS wager message: inbox, financial changes and outbox share one transaction.
 func (h *WagerMessageHandler) Handle(ctx context.Context, transportMessageID string, body string) error {
 	if strings.TrimSpace(transportMessageID) == "" {
 		return ErrInvalidMessageID

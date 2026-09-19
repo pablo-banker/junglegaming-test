@@ -19,11 +19,7 @@ func NewClock(pool *pgxpool.Pool) *Clock {
 	}
 }
 
-// Now returns the current PostgreSQL wall-clock time.
-//
-// clock_timestamp() advances inside a transaction, unlike CURRENT_TIMESTAMP, which is
-// frozen at BEGIN. Reading it after the wallet lock guarantees that movements of the
-// same wallet never observe a time earlier than the previous committed movement.
+// Now returns the PostgreSQL clock_timestamp(), which advances inside a transaction.
 func (c *Clock) Now(ctx context.Context) (time.Time, error) {
 	var now time.Time
 

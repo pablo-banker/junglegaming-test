@@ -6,8 +6,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// newErrorHandler writes every error using the API error contract.
-// Server errors are logged with their internal cause, which is never returned to clients.
+// newErrorHandler writes every error using the API error contract, never leaking internal causes.
 func newErrorHandler(logger *slog.Logger) fiber.ErrorHandler {
 	return func(c fiber.Ctx, err error) error {
 		apiErr := resolveError(err)

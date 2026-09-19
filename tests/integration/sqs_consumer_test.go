@@ -200,8 +200,7 @@ func TestSQSConsumerProcessesAndDeletesMessage(t *testing.T) {
 	}
 }
 
-// TestSQSConsumerDelaysTransientFailure verifies an unavailable database delays the message
-// with backoff instead of consuming a delivery every visibility timeout or reaching the DLQ.
+// TestSQSConsumerDelaysTransientFailure verifies an unavailable database delays the message with backoff.
 func TestSQSConsumerDelaysTransientFailure(t *testing.T) {
 	ctx := integrationContext(t)
 

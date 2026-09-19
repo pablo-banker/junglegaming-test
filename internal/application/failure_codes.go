@@ -1,7 +1,6 @@
 package application
 
-// Stable failure codes persisted on REJECTED and FAILED wager transactions.
-// They are part of the external contract and must never be renamed.
+// Stable failure codes of the external contract; they must never be renamed.
 const (
 	// FailureCodeBetInsufficientFunds rejects a BET larger than the wallet balance.
 	FailureCodeBetInsufficientFunds = "BET_INSUFFICIENT_FUNDS"

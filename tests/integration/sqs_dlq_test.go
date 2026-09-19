@@ -163,8 +163,7 @@ func receiveDLQMessage(
 	return types.Message{}
 }
 
-// TestSQSConsumerMovesPermanentFailureToDLQ verifies a message that can never succeed
-// reaches the DLQ on its first delivery, with the failure reason, and leaves the queue.
+// TestSQSConsumerMovesPermanentFailureToDLQ verifies a permanent failure reaches the DLQ on first delivery.
 func TestSQSConsumerMovesPermanentFailureToDLQ(t *testing.T) {
 	pool := openIntegrationPool(t)
 

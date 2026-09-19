@@ -64,8 +64,7 @@ func TestE2ERejectsExpiredToken(t *testing.T) {
 	assertWalletBalance(t, wallet.ID, "100.00")
 }
 
-// TestE2EProvidersAreIsolatedOnReplays verifies idempotency keys and external ids are scoped
-// by the authenticated provider: provider-b cannot replay or read provider-a's result.
+// TestE2EProvidersAreIsolatedOnReplays verifies a provider cannot replay or read another one's result.
 func TestE2EProvidersAreIsolatedOnReplays(t *testing.T) {
 	wallet := createRandomWalletE2E(t, internalToken(t), "100.00")
 
@@ -94,8 +93,7 @@ func TestE2EProvidersAreIsolatedOnReplays(t *testing.T) {
 	}
 }
 
-// TestE2ERejectsUnsafeInput verifies float amounts, oversized identifiers and payloads are
-// rejected before any financial effect.
+// TestE2ERejectsUnsafeInput verifies floats, oversized identifiers and payloads are rejected.
 func TestE2ERejectsUnsafeInput(t *testing.T) {
 	token := providerAToken(t)
 	wallet := createRandomWalletE2E(t, internalToken(t), "100.00")

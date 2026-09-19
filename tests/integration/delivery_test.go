@@ -56,8 +56,7 @@ func sqsBetFor(t *testing.T, wallet *application.CreateWalletResult, amount stri
 	return command, body
 }
 
-// TestHTTPAndSQSDeliverSameOperationOnce verifies the same operation received concurrently
-// through HTTP and SQS moves money once and both entry points report success.
+// TestHTTPAndSQSDeliverSameOperationOnce verifies the same operation moves money once.
 func TestHTTPAndSQSDeliverSameOperationOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -100,8 +99,7 @@ func TestHTTPAndSQSDeliverSameOperationOnce(t *testing.T) {
 	}
 }
 
-// TestSQSRedeliveryAfterCommitMovesMoneyOnce simulates a consumer that commits and dies
-// before deleting the message: the redelivery is answered by the inbox and deleted.
+// TestSQSRedeliveryAfterCommitMovesMoneyOnce verifies a redelivery after commit is answered by the inbox.
 func TestSQSRedeliveryAfterCommitMovesMoneyOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -268,8 +266,7 @@ func assertPublished(t *testing.T, ctx context.Context, pool *pgxpool.Pool, even
 	}
 }
 
-// TestOutboxDispatchersShareWorkWithoutDuplicates runs two publishers against the same
-// outbox: every committed event is published exactly once.
+// TestOutboxDispatchersShareWorkWithoutDuplicates verifies two publishers publish each event once.
 func TestOutboxDispatchersShareWorkWithoutDuplicates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -298,10 +295,7 @@ func TestOutboxDispatchersShareWorkWithoutDuplicates(t *testing.T) {
 	}
 }
 
-// TestOutboxRecoversAbandonedClaim simulates a publisher that crashed after publishing and
-// before confirming: once its lease expires another instance republishes the same eventId.
-// An event committed but never claimed (crash between commit and publication) is simply
-// published by the surviving instance.
+// TestOutboxRecoversAbandonedClaim verifies an expired claim is republished by another instance.
 func TestOutboxRecoversAbandonedClaim(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -357,8 +351,7 @@ func TestOutboxRecoversAbandonedClaim(t *testing.T) {
 	assertPublished(t, ctx, pool, neverClaimed)
 }
 
-// TestPendingReferenceResumesOnAnotherInstance verifies a PENDING_REFERENCE committed by
-// one instance is completed by another one, since the retry state lives in PostgreSQL.
+// TestPendingReferenceResumesOnAnotherInstance verifies another instance completes a pending reference.
 func TestPendingReferenceResumesOnAnotherInstance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
