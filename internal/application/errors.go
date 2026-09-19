@@ -11,4 +11,6 @@ var (
 	ErrWalletNotFound              = errors.New("wallet not found")
 	ErrWalletMismatch              = errors.New("wallet does not match wager")
 	ErrInvalidWalletReference      = errors.New("invalid wallet reference")
+	ErrInboxMessageConflict        = errors.New("inbox message conflict")
+	ErrInboxMessageNotFound        = errors.New("inbox message not found")
 )

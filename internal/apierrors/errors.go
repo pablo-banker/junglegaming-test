@@ -3,6 +3,7 @@ package apierrors
 const (
 	ErrPingDBCode = 100
 	ErrInternalCode
+	ErrSQSUnavailableCode
 )
 
 const (

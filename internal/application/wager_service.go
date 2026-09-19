@@ -18,9 +18,11 @@ const (
 	failureCodeBetInsufficientFunds      = "BET_INSUFFICIENT_FUNDS"
 	failureCodeReversalInsufficientFunds = "REVERSAL_INSUFFICIENT_FUNDS"
 	failureCodeReferenceNotProcessable   = "REFERENCE_NOT_PROCESSABLE"
+	failureCodeReferenceNotFound         = "REFERENCE_NOT_FOUND"
 	failureCodeDuplicateReversal         = "DUPLICATE_REVERSAL"
 
 	initialReferenceRetryDelay = 5 * time.Second
+	maxReferenceRetryDelay     = 5 * time.Minute
 	referenceRetryTTL          = 24 * time.Hour
 )
 
@@ -259,6 +261,48 @@ func (s *WagerService) GetByExternalTransactionID(
 	return wagerResultFromTransaction(transaction), nil
 }
 
+// RetryNextPendingReference retries one due pending reference transaction.
+func (s *WagerService) RetryNextPendingReference(
+	ctx context.Context,
+) (bool, error) {
+	processed := false
+
+	err := s.txManager.WithinTransaction(
+		ctx,
+		func(txCtx context.Context) error {
+			now, err := s.clock.Now(txCtx)
+			if err != nil {
+				return err
+			}
+
+			work, err := s.wagers.FindDuePendingReferenceForUpdate(
+				txCtx,
+				now,
+			)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return nil
+				}
+
+				return err
+			}
+
+			processed = true
+
+			return s.retryPendingReference(
+				txCtx,
+				work,
+				now,
+			)
+		},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return processed, nil
+}
+
 // resolveExistingTransaction handles persisted idempotency and external transaction conflicts.
 func (s *WagerService) resolveExistingTransaction(ctx context.Context, command ProcessWagerCommand, payloadHash string) (*ProcessWagerResult, error) {
 	existing, err := s.wagers.FindByProviderAndIdempotencyKey(ctx, command.ProviderID, command.IdempotencyKey)
@@ -338,7 +382,7 @@ func (s *WagerService) markPendingReference(ctx context.Context, transaction *do
 	nextAttemptAt := now.Add(initialReferenceRetryDelay)
 	expiresAt := now.Add(referenceRetryTTL)
 
-	if err := s.wagers.UpdatePendingReference(ctx, transaction, nextAttemptAt, expiresAt); err != nil {
+	if err := s.wagers.UpdatePendingReference(ctx, transaction, nextAttemptAt, expiresAt, metadata); err != nil {
 		return nil, err
 	}
 
@@ -586,6 +630,184 @@ func (s *WagerService) createBalanceChangedEvent(
 	}
 
 	return s.outbox.Create(ctx, event)
+}
+
+// retryPendingReference attempts to resolve one persisted pending reference.
+func (s *WagerService) retryPendingReference(
+	ctx context.Context,
+	work *PendingReferenceWork,
+	now time.Time,
+) error {
+	transaction := work.Transaction
+	metadata := work.Metadata
+
+	if !now.Before(work.ExpiresAt) {
+		_, err := s.reject(
+			ctx,
+			transaction,
+			failureCodeReferenceNotFound,
+			"referenced transaction was not found before expiration",
+			metadata,
+			now,
+		)
+
+		return err
+	}
+
+	reference, err := s.wagers.FindByProviderAndExternalTransactionID(
+		ctx,
+		transaction.ProviderID(),
+		transaction.ReferenceExternalTransactionID(),
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return s.schedulePendingReferenceRetry(
+				ctx,
+				transaction,
+				work.RetryCount,
+				now,
+			)
+		}
+
+		return err
+	}
+
+	switch reference.Status() {
+	case domain.WagerTransactionStatusProcessed:
+		return s.processResolvedPendingReference(
+			ctx,
+			transaction,
+			reference,
+			metadata,
+			now,
+		)
+
+	case domain.WagerTransactionStatusPending,
+		domain.WagerTransactionStatusPendingReference:
+		return s.schedulePendingReferenceRetry(
+			ctx,
+			transaction,
+			work.RetryCount,
+			now,
+		)
+
+	case domain.WagerTransactionStatusRejected,
+		domain.WagerTransactionStatusFailed:
+		_, err := s.reject(
+			ctx,
+			transaction,
+			failureCodeReferenceNotProcessable,
+			"referenced transaction did not complete successfully",
+			metadata,
+			now,
+		)
+
+		return err
+
+	default:
+		return domain.ErrInvalidWagerState
+	}
+}
+
+// schedulePendingReferenceRetry schedules the next exponential reference retry.
+func (s *WagerService) schedulePendingReferenceRetry(
+	ctx context.Context,
+	transaction *domain.WagerTransaction,
+	retryCount int,
+	now time.Time,
+) error {
+	nextRetryCount := retryCount + 1
+	nextAttemptAt := now.Add(referenceRetryDelay(nextRetryCount))
+
+	return s.wagers.SchedulePendingReferenceRetry(
+		ctx,
+		transaction.ID(),
+		nextRetryCount,
+		nextAttemptAt,
+	)
+}
+
+// processResolvedPendingReference processes a pending wager after its reference becomes available.
+func (s *WagerService) processResolvedPendingReference(
+	ctx context.Context,
+	transaction *domain.WagerTransaction,
+	reference *domain.WagerTransaction,
+	metadata CommandMetadata,
+	now time.Time,
+) error {
+	if err := transaction.ResolveReference(reference, now); err != nil {
+		return err
+	}
+
+	wallet, err := s.wallets.FindByIDForUpdate(
+		ctx,
+		transaction.WalletID(),
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ErrWalletNotFound
+		}
+
+		return err
+	}
+
+	if wallet.PlayerID() != transaction.PlayerID() {
+		return ErrWalletMismatch
+	}
+
+	if !wallet.Currency().Equal(transaction.Amount().Currency()) {
+		return domain.ErrCurrencyMismatch
+	}
+
+	if transaction.Type() == domain.WagerTransactionTypeRefund ||
+		transaction.Type() == domain.WagerTransactionTypeRollback {
+
+		duplicate, err := s.wagers.HasProcessedDirectReversal(
+			ctx,
+			transaction.ReferenceTransactionID(),
+		)
+		if err != nil {
+			return err
+		}
+
+		if duplicate {
+			_, err := s.reject(
+				ctx,
+				transaction,
+				failureCodeDuplicateReversal,
+				"referenced transaction already has a successful direct reversal",
+				metadata,
+				now,
+			)
+
+			return err
+		}
+	}
+
+	_, err = s.processWalletMovement(
+		ctx,
+		wallet,
+		transaction,
+		metadata,
+		now,
+	)
+
+	return err
+}
+
+// referenceRetryDelay calculates the exponential pending reference retry delay.
+func referenceRetryDelay(retryCount int) time.Duration {
+	delay := initialReferenceRetryDelay
+
+	for i := 0; i < retryCount; i++ {
+		if delay >= maxReferenceRetryDelay/2 {
+			return maxReferenceRetryDelay
+		}
+
+		delay *= 2
+	}
+
+	return delay
 }
 
 // resultFromWager builds the application response from persisted wager state.

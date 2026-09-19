@@ -41,5 +41,8 @@ var Module = fx.Module(
 			NewOutboxRepository,
 			fx.As(new(application.OutboxRepository)),
 		),
+		fx.Annotate(NewInboxRepository,
+			fx.As(new(application.InboxRepository)),
+		),
 	),
 )

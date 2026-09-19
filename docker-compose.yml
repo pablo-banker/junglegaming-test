@@ -80,7 +80,7 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      AWS_DEFAULT_REGION: ${AWS_REGION}
     volumes:
       - ./docker/ministack/init-sqs.sh:/docker-entrypoint-initaws.d/ready.d/01-init-sqs.sh:ro
     healthcheck:

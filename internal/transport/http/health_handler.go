@@ -6,12 +6,14 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/pablo-banker/junglegaming-test/internal/apierrors"
+	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/sqs"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type HealthHandler struct {
-	db *pgxpool.Pool
+	db  *pgxpool.Pool
+	sqs *sqs.HealthChecker
 }
 
 type HealthResponse struct {
@@ -19,9 +21,10 @@ type HealthResponse struct {
 }
 
 // NewHealthHandler creates a health handler backed by the PostgreSQL pool.
-func NewHealthHandler(db *pgxpool.Pool) *HealthHandler {
+func NewHealthHandler(db *pgxpool.Pool, sqsHealth *sqs.HealthChecker) *HealthHandler {
 	return &HealthHandler{
-		db: db,
+		db:  db,
+		sqs: sqsHealth,
 	}
 }
 
@@ -43,9 +46,11 @@ func (h *HealthHandler) Ready(c fiber.Ctx) error {
 		return apierrors.ErrPingDB.WithCause(err)
 	}
 
-	return BuildSuccessResponse(
-		c, fiber.StatusOK, HealthResponse{
-			Status: "ready",
-		},
-	)
+	if err := h.sqs.Check(ctx); err != nil {
+		return apierrors.ErrSQSUnavailable.WithCause(err)
+	}
+
+	return BuildSuccessResponse(c, fiber.StatusOK, HealthResponse{
+		Status: "ready",
+	})
 }

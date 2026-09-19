@@ -5,6 +5,8 @@ import (
 	"github.com/pablo-banker/junglegaming-test/internal/config"
 	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/keycloak"
 	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/postgres"
+	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/sqs"
+	"github.com/pablo-banker/junglegaming-test/internal/infrastructure/worker"
 	"github.com/pablo-banker/junglegaming-test/internal/observability"
 	httptransport "github.com/pablo-banker/junglegaming-test/internal/transport/http"
 	"go.uber.org/fx"
@@ -15,6 +17,8 @@ var App = fx.Options(
 	observability.Module,
 	postgres.Module,
 	keycloak.Module,
+	sqs.Module,
+	worker.Module,
 	application.Module,
 	httptransport.Module,
 )

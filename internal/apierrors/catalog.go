@@ -3,8 +3,9 @@ package apierrors
 import "net/http"
 
 var (
-	ErrPingDB   = New(ErrPingDBCode, "database is unavailable", http.StatusServiceUnavailable)
-	ErrInternal = New(ErrInternalCode, "an unexpected error occurred", http.StatusInternalServerError)
+	ErrPingDB         = New(ErrPingDBCode, "database is unavailable", http.StatusServiceUnavailable)
+	ErrInternal       = New(ErrInternalCode, "an unexpected error occurred", http.StatusInternalServerError)
+	ErrSQSUnavailable = New(ErrSQSUnavailableCode, "service unavailable", http.StatusServiceUnavailable)
 )
 
 var (

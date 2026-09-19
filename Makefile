@@ -16,6 +16,9 @@ test_unit:
 	go test -v -race -tags=unit -count=1 -coverprofile=coverage_unit.out ./...
 
 test_integration:
+	set -a; \
+	. ./.env; \
+	set +a; \
 	go test -v -race -tags=integration -count=1 -coverprofile=coverage_integration.out ./tests/integration
 
 test_e2e:
@@ -29,9 +32,6 @@ test_e2e_multi:
 
 test_e2e_restart:
 	E2E_RESTART_PORT=8090 go test -v -race -count=1 -tags="e2e restart" ./tests/e2e -run TestE2ERestart
-
-test_cover:
-	go tool cover -html=$(or $(FILE),coverage_unit.out)
 
 # ==============================================================================
 # INFRA AND DATABASE

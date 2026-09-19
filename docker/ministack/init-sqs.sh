@@ -7,6 +7,9 @@ ENDPOINT="http://localhost:4566"
 
 DLQ_NAME="wager-transactions-dlq.fifo"
 QUEUE_NAME="wager-transactions.fifo"
+EVENT_QUEUE_NAME="integration-events.fifo"
+
+
 
 DLQ_URL=$(aws \
   --endpoint-url="$ENDPOINT" \
@@ -47,3 +50,10 @@ aws \
   sqs set-queue-attributes \
   --queue-url "$QUEUE_URL" \
   --attributes file:///tmp/redrive-policy.json
+
+aws \
+  --endpoint-url="$ENDPOINT" \
+  --region "$REGION" \
+  sqs create-queue \
+  --queue-name "$EVENT_QUEUE_NAME" \
+  --attributes FifoQueue=true
