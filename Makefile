@@ -73,3 +73,12 @@ keycloak_down:
 keycloak_reset:
 	docker compose rm -sf keycloak
 	docker compose up -d keycloak
+
+sqs_up:
+	docker compose up -d ministack
+
+sqs_down:
+	docker compose stop ministack
+
+sqs_logs:
+	docker compose logs -f ministack
