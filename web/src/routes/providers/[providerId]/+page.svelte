@@ -6,12 +6,21 @@
 	import OperationEffect from '$lib/components/OperationEffect.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import TxStatus from '$lib/components/TxStatus.svelte';
-	import { formatMoney } from '$lib/money';
-	import type { OperationResult, TokenInfo, WalletView } from '$lib/types';
+	import { AMOUNT_PATTERN, formatMoney } from '$lib/money';
+	import type { OperationResult, TokenInfo, WagerKind, WagerPayload, WalletView } from '$lib/types';
 
 	let { data, form } = $props();
 
-	const kinds = ['BET', 'WIN', 'LOSS', 'REFUND', 'ROLLBACK'] as const;
+	const kinds: WagerKind[] = ['BET', 'WIN', 'LOSS', 'REFUND', 'ROLLBACK'];
+
+	// Reference rules of the domain: BET and LOSS refuse one, WIN accepts a BET, REFUND and ROLLBACK require one.
+	const rules: Record<WagerKind, { need: 'none' | 'optional' | 'required'; from: WagerKind[]; hint: string }> = {
+		BET: { need: 'none', from: [], hint: 'Debita a aposta da carteira. A API rejeita um BET que traga referência.' },
+		WIN: { need: 'optional', from: ['BET'], hint: 'Credita o prêmio. A referência a um BET processado é opcional e o valor pode ser diferente da aposta.' },
+		LOSS: { need: 'none', from: [], hint: 'Fecha a rodada sem movimento: amount 0.00, sem referência, saldo e wallet version não mudam.' },
+		REFUND: { need: 'required', from: ['BET'], hint: 'Devolve uma aposta: exige um BET processado e o mesmo valor dele.' },
+		ROLLBACK: { need: 'required', from: ['BET', 'WIN', 'REFUND'], hint: 'Desfaz uma operação processada com o mesmo valor dela.' }
+	};
 
 	/** Short random suffix for generated identifiers. */
 	const shortId = () => crypto.randomUUID().slice(0, 8);
@@ -21,7 +30,7 @@
 	let op = $state({
 		walletId: firstWallet?.id ?? '',
 		playerId: firstWallet?.playerId ?? '',
-		kind: 'BET' as (typeof kinds)[number],
+		kind: 'BET' as WagerKind,
 		amount: '25.00',
 		currency: firstWallet?.view?.balance.currency ?? 'BRL',
 		roundId: `round-${shortId()}`,
@@ -38,7 +47,40 @@
 	let shown = $state(0);
 	let sending = $state(false);
 
+	// The operation picked as reference; while it is set, the fields it filled stay locked.
+	let linked = $state<WagerPayload | undefined>(undefined);
+
+	// Remembers the amount typed before a LOSS, which is always zero, to restore it afterwards.
+	let typedAmount = '25.00';
+
 	const token = $derived((form && 'token' in form ? (form.token as TokenInfo) : undefined) ?? data.token);
+
+	const rule = $derived(rules[op.kind]);
+
+	/** Requests of this session that the API processed, newest first and without replay duplicates. */
+	const processed = $derived([
+		...new Map(
+			history
+				.filter((result) => (result.response.body as { status?: string } | null)?.status === 'PROCESSED')
+				.map((result) => [result.request.externalTransactionId, result.request] as const)
+		).values()
+	]);
+
+	/** Processed operations that the current kind may reference. */
+	const candidates = $derived(processed.filter((request) => rule.from.includes(request.kind)));
+
+	// The API compares wallet, player, round, currency and amount with the reference (REFERENCE_MISMATCH).
+	const contextLocked = $derived(linked !== undefined);
+	const amountLocked = $derived(op.kind === 'LOSS' || (linked !== undefined && rule.need === 'required'));
+
+	/** Wallet movement a rollback produces, which is the opposite of the referenced operation. */
+	const rollbackDirection = $derived(linked && linked.kind === 'BET' ? 'CREDIT' : 'DEBIT');
+
+	/** Blocks only what the API would certainly reject; the rest is left to the backend. */
+	const blocked = $derived(
+		(rule.need === 'required' && !op.referenceExternalTransactionId) ||
+			(op.kind === 'LOSS' ? op.amount !== '0.00' : !AMOUNT_PATTERN.test(op.amount) || op.amount === '0.00')
+	);
 
 	/** Fills the operation with a wallet of the test list. */
 	function useWallet(wallet: { id: string; playerId: string; view?: WalletView }) {
@@ -47,21 +89,59 @@
 		if (wallet.view) op.currency = wallet.view.balance.currency;
 	}
 
-	/** Prepares a new operation that references a previous one. */
-	function reference(result: OperationResult) {
-		op.walletId = result.request.walletId;
-		op.playerId = result.request.playerId;
-		op.roundId = result.request.roundId;
-		op.referenceExternalTransactionId = result.request.externalTransactionId;
+	/** Makes the operation unique again, so the next send is not an idempotent replay. */
+	function renewIdentifiers() {
 		op.externalTransactionId = `tx-${shortId()}`;
 		customKey = null;
 	}
 
+	/** Drops the reference and unlocks the fields it had filled. */
+	function unlink() {
+		linked = undefined;
+		op.referenceExternalTransactionId = '';
+	}
+
+	/** Switches the operation kind and applies its rules to the form. */
+	function chooseKind(kind: WagerKind) {
+		op.kind = kind;
+		unlink();
+
+		if (kind === 'LOSS') {
+			typedAmount = op.amount === '0.00' ? typedAmount : op.amount;
+			op.amount = '0.00';
+		} else if (op.amount === '0.00') {
+			op.amount = typedAmount;
+		}
+
+		renewIdentifiers();
+	}
+
+	/** Copies the context of a processed operation; REFUND and ROLLBACK also copy its amount. */
+	function selectReference(request: WagerPayload) {
+		linked = request;
+		op.referenceExternalTransactionId = request.externalTransactionId;
+		op.walletId = request.walletId;
+		op.playerId = request.playerId;
+		op.roundId = request.roundId;
+		op.currency = request.money.currency;
+
+		// A WIN pays a prize that does not have to match the bet, so only the required references copy the amount.
+		if (rule.need === 'required') op.amount = request.money.amount;
+	}
+
+	/** Applies the reference chosen in the selector. */
+	function pickReference(externalTransactionId: string) {
+		const request = candidates.find((candidate) => candidate.externalTransactionId === externalTransactionId);
+
+		if (request) selectReference(request);
+		else unlink();
+	}
+
 	/** Loads exactly the same request, including its key, to observe the replay. */
 	function repeat(result: OperationResult) {
+		op.kind = result.request.kind;
 		op.walletId = result.request.walletId;
 		op.playerId = result.request.playerId;
-		op.kind = result.request.kind;
 		op.amount = result.request.money.amount;
 		op.currency = result.request.money.currency;
 		op.roundId = result.request.roundId;
@@ -69,6 +149,8 @@
 		op.externalTransactionId = result.request.externalTransactionId;
 		op.referenceExternalTransactionId = result.request.referenceExternalTransactionId ?? '';
 		customKey = result.response.idempotencyKey ?? null;
+
+		linked = candidates.find((candidate) => candidate.externalTransactionId === op.referenceExternalTransactionId);
 	}
 </script>
 
@@ -159,7 +241,12 @@
 				<ul class="space-y-2">
 					{#each data.wallets as wallet (wallet.id)}
 						<li class="bg-base-100 rounded-box flex items-center justify-between gap-2 border p-2 {op.walletId === wallet.id ? 'border-primary' : 'border-base-300'}">
-							<button class="min-w-0 flex-1 text-left" onclick={() => useWallet(wallet)}>
+							<button
+								class="min-w-0 flex-1 text-left disabled:opacity-60"
+								disabled={contextLocked}
+								title={contextLocked ? 'a carteira vem da operação referenciada' : 'usar nesta operação'}
+								onclick={() => useWallet(wallet)}
+							>
 								<span class="block truncate font-mono text-xs opacity-60">{wallet.id}</span>
 								{#if wallet.view}
 									<span class="font-semibold">{formatMoney(wallet.view.balance.amount, wallet.view.balance.currency)}</span>
@@ -206,38 +293,48 @@
 					};
 				}}
 			>
-				<div class="join">
-					{#each kinds as kind (kind)}
-						<label class="btn btn-sm join-item {op.kind === kind ? 'btn-primary' : ''}">
-							<input type="radio" name="kind" value={kind} bind:group={op.kind} class="hidden" />
-							{kind}
-						</label>
-					{/each}
+				<div>
+					<div class="join">
+						{#each kinds as kind (kind)}
+							<label class="btn btn-sm join-item {op.kind === kind ? 'btn-primary' : ''}">
+								<input type="radio" name="kind" value={kind} checked={op.kind === kind} onchange={() => chooseKind(kind)} class="hidden" />
+								{kind}
+							</label>
+						{/each}
+					</div>
+					<p class="mt-2 text-xs opacity-60">{rule.hint}</p>
 				</div>
 
 				<div class="grid gap-3 md:grid-cols-2">
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">walletId</legend>
-						<input class="input input-sm w-full font-mono" name="walletId" bind:value={op.walletId} />
+						<input class="input input-sm w-full font-mono" class:opacity-60={contextLocked} class:cursor-not-allowed={contextLocked} name="walletId" readonly={contextLocked} bind:value={op.walletId} />
 					</fieldset>
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">playerId</legend>
-						<input class="input input-sm w-full font-mono" name="playerId" bind:value={op.playerId} />
+						<input class="input input-sm w-full font-mono" class:opacity-60={contextLocked} class:cursor-not-allowed={contextLocked} name="playerId" readonly={contextLocked} bind:value={op.playerId} />
 					</fieldset>
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">amount</legend>
-						<input class="input input-sm w-full font-mono" name="amount" bind:value={op.amount} />
+						<input class="input input-sm w-full font-mono" class:opacity-60={amountLocked} class:cursor-not-allowed={amountLocked} name="amount" readonly={amountLocked} bind:value={op.amount} />
+						{#if op.kind === 'LOSS'}
+							<p class="label text-xs">LOSS só é aceito com 0.00.</p>
+						{:else if amountLocked}
+							<p class="label text-xs">O valor é o da operação referenciada.</p>
+						{/if}
 					</fieldset>
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">currency</legend>
-						<input class="input input-sm w-full font-mono" name="currency" bind:value={op.currency} />
+						<input class="input input-sm w-full font-mono" class:opacity-60={contextLocked} class:cursor-not-allowed={contextLocked} name="currency" readonly={contextLocked} bind:value={op.currency} />
 					</fieldset>
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">
 							roundId
-							<button type="button" class="link link-primary ml-1" onclick={() => (op.roundId = `round-${shortId()}`)}>nova</button>
+							{#if !contextLocked}
+								<button type="button" class="link link-primary ml-1" onclick={() => (op.roundId = `round-${shortId()}`)}>nova</button>
+							{/if}
 						</legend>
-						<input class="input input-sm w-full font-mono" name="roundId" bind:value={op.roundId} />
+						<input class="input input-sm w-full font-mono" class:opacity-60={contextLocked} class:cursor-not-allowed={contextLocked} name="roundId" readonly={contextLocked} bind:value={op.roundId} />
 					</fieldset>
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">gameId</legend>
@@ -246,16 +343,7 @@
 					<fieldset class="fieldset">
 						<legend class="fieldset-legend">
 							externalTransactionId
-							<button
-								type="button"
-								class="link link-primary ml-1"
-								onclick={() => {
-									op.externalTransactionId = `tx-${shortId()}`;
-									customKey = null;
-								}}
-							>
-								novo
-							</button>
+							<button type="button" class="link link-primary ml-1" onclick={renewIdentifiers}>novo</button>
 						</legend>
 						<input class="input input-sm w-full font-mono" name="externalTransactionId" bind:value={op.externalTransactionId} />
 					</fieldset>
@@ -269,13 +357,62 @@
 						<input class="input input-sm w-full font-mono" name="idempotencyKey" value={idempotencyKey} oninput={(event) => (customKey = event.currentTarget.value)} />
 					</fieldset>
 					<fieldset class="fieldset md:col-span-2">
-						<legend class="fieldset-legend">referenceExternalTransactionId</legend>
-						<input class="input input-sm w-full font-mono" name="referenceExternalTransactionId" bind:value={op.referenceExternalTransactionId} placeholder="vazio = sem referência" />
-						<p class="label text-xs">REFUND e ROLLBACK exigem; WIN aceita.</p>
+						<legend class="fieldset-legend">
+							referenceExternalTransactionId
+							{#if rule.need === 'required'}<span class="badge badge-xs badge-soft badge-warning">obrigatória</span>{/if}
+							{#if rule.need === 'optional'}<span class="badge badge-xs badge-soft">opcional</span>{/if}
+						</legend>
+
+						<!-- The value travels in a hidden field so a replayed reference survives even outside the options. -->
+						<input type="hidden" name="referenceExternalTransactionId" value={rule.need === 'none' ? '' : op.referenceExternalTransactionId} />
+
+						{#if rule.need === 'none'}
+							<input class="input input-sm w-full cursor-not-allowed font-mono opacity-60" value="" readonly placeholder="{op.kind} não aceita referência" />
+						{:else}
+							<select
+								class="select select-sm w-full font-mono"
+								disabled={candidates.length === 0}
+								value={op.referenceExternalTransactionId}
+								onchange={(event) => pickReference(event.currentTarget.value)}
+								aria-label="operação referenciada"
+							>
+								{#if rule.need === 'optional'}
+									<option value="">sem referência</option>
+								{:else if !op.referenceExternalTransactionId}
+									<option value="" disabled>escolha a operação referenciada</option>
+								{/if}
+								{#each candidates as candidate (candidate.externalTransactionId)}
+									<option value={candidate.externalTransactionId}>
+										{candidate.kind}
+										{formatMoney(candidate.money.amount, candidate.money.currency)} · {candidate.externalTransactionId} · {candidate.roundId}
+									</option>
+								{/each}
+							</select>
+
+							{#if candidates.length === 0}
+								<p class="label text-warning text-xs">
+									Nenhuma {rule.from.join(' ou ')} processada nesta sessão; envie uma primeiro.
+								</p>
+							{:else if linked}
+								<p class="label text-xs">
+									Vinculada a {linked.kind} de {formatMoney(linked.money.amount, linked.money.currency)}; walletId, playerId, roundId e currency ficam travados para evitar REFERENCE_MISMATCH.
+								</p>
+							{/if}
+
+							{#if op.kind === 'ROLLBACK'}
+								<p class="label text-xs">
+									{#if linked}
+										rollback de {linked.kind} → <span class="font-mono">{rollbackDirection}</span> na carteira
+									{:else}
+										rollback de BET → CREDIT; rollback de WIN ou REFUND → DEBIT
+									{/if}
+								</p>
+							{/if}
+						{/if}
 					</fieldset>
 				</div>
 
-				<button class="btn btn-primary" disabled={sending || data.status.status !== 'RUNNING'}>
+				<button class="btn btn-primary" disabled={sending || blocked || data.status.status !== 'RUNNING'}>
 					{#if sending}<span class="loading loading-spinner loading-sm"></span>{/if}
 					Enviar {op.kind}
 				</button>
@@ -303,6 +440,7 @@
 					<tbody>
 						{#each history as result, index (result.at)}
 							{@const body = (result.response.body ?? {}) as { status?: string; failureCode?: string; idempotentReplay?: boolean; balance?: { amount: string } }}
+							{@const referenceable = candidates.some((candidate) => candidate.externalTransactionId === result.request.externalTransactionId)}
 							<tr class="hover:bg-base-300 cursor-pointer {index === shown ? 'bg-base-300' : ''}" onclick={() => (shown = index)}>
 								<td class="font-mono text-xs">{new Date(result.at).toLocaleTimeString('pt-BR')}</td>
 								<td class="font-mono text-xs">{result.request.kind} {result.request.money.amount}</td>
@@ -313,15 +451,18 @@
 								<td class="text-xs">{body.idempotentReplay ? 'sim' : ''}</td>
 								<td class="font-mono text-xs">{body.balance?.amount ?? ''}</td>
 								<td class="whitespace-nowrap">
-									<button
-										class="btn btn-ghost btn-xs"
-										onclick={(event) => {
-											event.stopPropagation();
-											reference(result);
-										}}
-									>
-										referenciar
-									</button>
+									{#if referenceable}
+										<button
+											class="btn btn-ghost btn-xs"
+											title="usar como referência do {op.kind}"
+											onclick={(event) => {
+												event.stopPropagation();
+												selectReference(result.request);
+											}}
+										>
+											referenciar
+										</button>
+									{/if}
 									<button
 										class="btn btn-ghost btn-xs"
 										onclick={(event) => {
